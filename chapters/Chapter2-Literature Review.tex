@@ -1,0 +1,85 @@
+\doublespacing % Do not change - required
+
+\chapter{Literature review}
+\label{ch2}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% IMPORTANT
+\begin{spacing}{1} %THESE FOUR
+\minitoc % LINES MUST APPEAR IN
+\end{spacing} % EVERY
+\thesisspacing % CHAPTER
+% COPY THEM IN ANY NEW CHAPTER
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+\section{Fundamentals of LLM Quantization}
+
+LLM quantization reduces the numerical precision used to represent model tensors in order to lower storage, memory traffic and potentially inference cost. The practical difficulty increases as precision is reduced, particularly for Transformer models whose weight and activation distributions may contain sensitive channels or large-magnitude outliers. Quantization can therefore differ not only in bit width but also in scope, ranging from weight-only schemes to methods that additionally quantize runtime activations and the \ac{KV} cache. These distinctions provide the basis for the specific methods reviewed in the following sections.
+
+
+\subsection{Numerical precision and quantization}
+Neural-network parameters and intermediate tensors are conventionally represented using floating-point formats such as FP32, FP16 or BF16. Lower-precision formats reduce the number of bits required for each value and can therefore decrease model storage and memory traffic. Quantization extends this principle by mapping a high-precision tensor onto a finite set of discrete reconstruction levels, commonly represented using integer formats such as INT8 or INT4. When appropriate low-precision kernels are available, this representation can additionally enable integer or mixed-precision computation rather than merely reducing checkpoint size \cite{jacob2017quantizationtrainingneuralnetworks}.
+
+A commonly used uniform affine quantizer maps a real-valued element \(x\) to an integer code according to
+
+\begin{equation}
+q(x)
+=
+\operatorname{clip}
+\left(
+\operatorname{round}
+\left(
+\frac{x}{s}
+\right)
++z,\,
+q_{\min},q_{\max}
+\right),
+\label{eq:uniform-quantization}
+\end{equation}
+
+where \(s\) is the quantization scale, \(z\) is the zero-point, and \(q_{\min}\) and \(q_{\max}\) define the representable integer range. The approximate reconstructed value is then
+
+\begin{equation}
+\hat{x}
+=
+s\left(q(x)-z\right).
+\label{eq:uniform-dequantization}
+\end{equation}
+
+For a \(b\)-bit representation, no more than \(2^b\) distinct integer codes are available. Reducing the bit width lowers storage requirements but also decreases the number of reconstruction levels available to approximate the original tensor. This introduces quantization error, and the error generally becomes more difficult to control as the precision is reduced. Quantization methods are consequently not only to approximate individual tensor values, but also to limit the effect of their approximation on the output and language-model behavior of the network.
+
+
+\subsection{Post-training quantization}
+
+
+\subsection{Scalar, group-wise and vector quantization}
+
+\subsection{Quantization of weights, activations and KV cache}
+
+
+\section{Weight-Only Post-Training Quantization}
+
+
+\subsection{\ac{GPTQ}}
+
+
+\subsection{\ac{AWQ}}
+
+\subsection{Critical comparison of weight-only approaches}
+
+
+\section{Weight–Activation Quantization}
+
+\subsection{Activation outliers}
+
+
+\subsection{SmoothQuant}
+
+
+\subsection{Low-bit \ac{W4A8}-related approaches}
+
+
+\subsection{Limitations of joint W/A quantization}

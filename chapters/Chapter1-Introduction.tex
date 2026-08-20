@@ -51,7 +51,7 @@ The impact of memory traffic differs between the two principal phases of autoreg
 
 The inference-memory footprint also extends beyond the model weights. Intermediate \emph{activations} are generated dynamically as information propagates through the attention and feed-forward components of each Transformer block. Their memory requirements depend on factors including batch size, sequence length and hidden-state dimensionality. Unlike weights, which remain fixed after training and can therefore be quantized offline, activations depend on the current input and must be processed during runtime. Reducing their precision consequently requires a runtime quantization strategy and introduces an additional source of quantization error within the inference computation.
 
-A further source of inference memory is the \ac{KV}. During autoregressive generation, the self-attention mechanism produces key and value representations for each processed token. Recomputing these representations for all preceding tokens whenever a new token is generated would introduce substantial redundant computation. Instead, previously computed key and value tensors are retained in memory and reused during subsequent decoding steps. This substantially improves computational efficiency, but creates an additional memory requirement that is separate from the static model-weight footprint.
+A further source of inference memory is the \ac{KV} cache. During autoregressive generation, the self-attention mechanism produces key and value representations for each processed token. Recomputing these representations for all preceding tokens whenever a new token is generated would introduce substantial redundant computation. Instead, previously computed key and value tensors are retained in memory and reused during subsequent decoding steps. This substantially improves computational efficiency, but creates an additional memory requirement that is separate from the static model-weight footprint.
 
 Unlike model weights, whose storage requirement remains approximately constant once the model architecture and numerical precision are fixed, the size of the \ac{KV} cache increases with the number of tokens retained in the context. In simplified form,
 
@@ -76,10 +76,46 @@ The principal difficulty is that reducing numerical precision also reduces the n
 
 
 \section{Research Aim}
+The aim of this dissertation is to investigate the trade-offs introduced by low-bit post-training quantization of Llama-3.2-3B-Instruct, with particular emphasis on the relationship between model quality, effective compression, quantization scope and practical deployment characteristics. Rather than treating nominal bit width as the sole measure of quantization effectiveness, the study considers which components of the inference process are quantized, including model weights, runtime activations and the key--value cache, together with the storage and implementation overheads associated with their low-precision representations.
 
+This aim is addressed through a comparative investigation of \acro{AWQ}, SmoothQuant, \ac{W4A8} quantization pipeline developed within this project, and NestQuant. GPTQ is additionally considered as an important methodological reference for reconstruction-aware low-bit weight quantization. The study seeks to distinguish controlled comparisons between closely matched precision configurations from broader design-space comparisons between methods that quantize different components of the inference process.
+
+The investigation is guided by the following research questions:
+
+\begin{enumerate}
+    \item \textbf{RQ1:} How does low-bit post-training quantization affect the language-modelling quality of Llama-3.2-3B-Instruct across the quantization configurations considered in this project?
+
+    \item \textbf{RQ2:} How does progressively extending quantization from model weights to activations and the KV cache affect the trade-off between model quality and compression?
+
+    \item \textbf{RQ3:} To what extent do nominal bit-width configurations reflect the effective storage reduction achieved once quantization metadata, packing and other representation overheads are considered?
+
+    \item \textbf{RQ4:} What practical deployment trade-offs arise across AWQ, SmoothQuant, W4A8 and NestQuant when model quality, memory requirements, effective compression and implementation characteristics are considered together?
+\end{enumerate}
 
 
 \section{Project Objectives}
+To achieve the research aim and address the research questions defined above, the project has the following objectives:
 
+\begin{enumerate}
+
+    \item \textbf{Establish a reproducible full-precision reference for Llama-3.2-3B-Instruct.}  
+    Construct a consistent evaluation pipeline for the unquantized model and define the datasets, calibration procedure and evaluation metrics used as the reference for subsequent quantization experiments.
+
+    \item \textbf{Implement and evaluate representative post-training quantization approaches.}  
+    Apply \ac{AWQ} as a low-bit weight-only configuration and SmoothQuant as a joint weight--activation configuration, and reproduce their evaluation within a common experimental framework so that their effects on model quality and model representation can be compared consistently.
+
+    \item \textbf{Develop and evaluate a \ac{W4A8} inference pipeline.}  
+    Implement a configuration combining 4-bit model weights with 8-bit runtime activations, including the required weight representation, activation quantization and low-precision execution components, and assess the resulting quality, compression and runtime characteristics.
+
+    \item \textbf{Implement and investigate NestQuant across progressively broader quantization scopes.}  
+    Apply the nested-lattice quantization framework to Llama-3.2-3B-Instruct and investigate configurations spanning weight quantization, \ac{KV}-cache quantization and joint weight--activation--\ac{KV} quantization, including configurations corresponding to \ac{W4A16KV16}, \ac{W4A16KV4} and \ac{W4A4KV4} where supported by the implementation.
+
+    \item \textbf{Quantitatively evaluate the quality--compression trade-off of the resulting models.}  
+    Compare the quantized configurations using language-modelling quality metrics, including perplexity and negative log-likelihood, together with measures of storage and compression such as checkpoint size and effective bit rate. Where meaningful, runtime throughput and memory measurements are additionally used to characterise deployment behaviour.
+
+    \item \textbf{Critically compare the quantization approaches and identify their deployment trade-offs and limitations.}  
+    Distinguish controlled comparisons between closely matched configurations from broader design-space comparisons, and assess how quantization precision, quantization scope, auxiliary representation overhead and implementation maturity influence the practical benefits obtained from low-bit inference.
+
+\end{enumerate}
 
 
