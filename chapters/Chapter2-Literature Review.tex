@@ -53,7 +53,31 @@ For a \(b\)-bit representation, no more than \(2^b\) distinct integer codes are 
 
 
 \subsection{Post-training quantization}
+\ac{PTQ} converts an already trained high-precision model into a
+lower-precision representation without repeating the original
+end-to-end training process. This distinguishes it from
+quantization-aware training, in which simulated quantization effects
+are introduced during optimisation so that the model parameters can
+adapt to the resulting numerical error. Earlier integer-inference
+frameworks demonstrated that incorporating quantization during training
+can preserve model accuracy while enabling low-precision execution
+\cite{jacob2017quantizationtrainingneuralnetworks}. However, repeating
+such optimisation can be prohibitively expensive for large pretrained
+language models, making \ac{PTQ} particularly attractive when the
+original training data, training infrastructure or computational budget
+are unavailable.
 
+A typical \ac{PTQ} pipeline uses a comparatively small representative
+calibration dataset to estimate the numerical ranges and statistical
+properties of the tensors being quantized. These observations may be
+used to determine scale factors, clipping thresholds, zero-points or
+other quantizer parameters. Model weights are fixed after training and
+can therefore be analysed and quantized offline. Activations, by
+contrast, depend on the current input and may use either scales
+estimated during calibration or dynamically calculated runtime scales.
+The calibration data should be representative of the intended model
+inputs, but must remain separate from the data used for final
+evaluation.
 
 \subsection{Scalar, group-wise and vector quantization}
 
