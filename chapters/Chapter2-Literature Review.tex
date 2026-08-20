@@ -72,7 +72,7 @@ calibration dataset to estimate the numerical ranges and statistical
 properties of the tensors being quantized. These observations may be
 used to determine scale factors, clipping thresholds, zero-points or
 other quantizer parameters. Model weights are fixed after training and
-can therefore be analysed and quantized offline\cite{11158258}. Activations, by
+can therefore be analysed and quantized offline. Activations, by
 contrast, depend on the current input and may use either scales
 estimated during calibration or dynamically calculated runtime scales.
 The calibration data should be representative of the intended model
@@ -128,7 +128,7 @@ Q_{\mathrm{V}}(\mathbf{x})
 \end{equation}
 
 where the selected codeword \(Q_{\mathrm{V}}(\mathbf{x})\) provides the
-reconstruction of the complete input vector. Unlike scalar
+reconstruction of the complete input vector\cite{1094577}. Unlike scalar
 quantization, this representation can account for the joint geometry of
 multiple tensor elements when allocating reconstruction points.
 Consequently, vector quantization can offer a different
@@ -154,9 +154,114 @@ complexity.
 
 \section{Weight-Only Post-Training Quantization}
 
+Weight-only \ac{PTQ} reduces model storage and memory traffic by quantizing pretrained weights while retaining activations and the \ac{KV} cache at higher precision, with \acs{GPTQ} and \acs{AWQ} representing two influential approaches for limiting the resulting degradation in model quality.
 
 \subsection{\ac{GPTQ}}
+\ac{GPTQ} is a one-shot weight-only post-training quantization method
+designed to preserve the behaviour of large Transformer models at low
+weight precision. It extends the second-order quantization principles of
+Optimal Brain Compression, which in turn adapts the Optimal Brain
+Surgeon framework to post-training weight quantization
+\cite{frantar2022obc,frantar2023gptq}. Rather than minimising the
+element-wise difference between the original and quantized weights,
+GPTQ quantizes each linear layer by attempting to preserve its output
+over a small calibration dataset.
 
+Let \(\mathbf{W}\) denote the full-precision weight matrix of a linear
+layer and let \(\mathbf{X}\) contain representative input activations
+collected during calibration. The layer-wise reconstruction problem can
+be expressed as
+
+\begin{equation}
+\widehat{\mathbf{W}}
+=
+\underset{\widetilde{\mathbf{W}}\in\mathcal{Q}}
+{\operatorname{arg\,min}}
+\left\|
+\mathbf{W}\mathbf{X}
+-
+\widetilde{\mathbf{W}}\mathbf{X}
+\right\|_{F}^{2},
+\label{eq:gptq-reconstruction}
+\end{equation}
+
+where \(\mathcal{Q}\) denotes the set of weight matrices permitted by
+the selected quantization grid. This objective differs from directly
+minimising
+\(\|\mathbf{W}-\widetilde{\mathbf{W}}\|_{F}^{2}\), because it weights
+the importance of a weight perturbation according to the calibration
+activations passing through the layer. A numerically small weight error
+can therefore still be important if it strongly affects the layer
+output.
+
+For each row of the weight matrix, the reconstruction objective is
+quadratic and has an activation-dependent Hessian. GPTQ uses the
+damped approximation
+
+\begin{equation}
+\mathbf{H}
+=
+2\mathbf{X}\mathbf{X}^{\top}
++
+\lambda\mathbf{I},
+\label{eq:gptq-hessian}
+\end{equation}
+
+where \(\lambda\mathbf{I}\) provides numerical damping. When a weight
+or weight column is mapped to its quantized value, information from
+\(\mathbf{H}^{-1}\) is used to update the remaining unquantized
+weights. These updates compensate for the output error introduced by
+the current rounding decision, allowing subsequent weights to absorb
+part of the perturbation rather than quantizing all values
+independently.
+
+GPTQ introduces several modifications that make this second-order
+procedure scalable to models containing billions of parameters. The
+underlying Optimal Brain Quantization method greedily determines a
+separate weight order for each row, which requires repeated and
+expensive updates of the inverse Hessian. GPTQ instead quantizes all
+rows according to the same fixed column order. Since the Hessian
+depends on the calibration inputs rather than on the individual weight
+rows, this permits the second-order information to be shared across
+rows and substantially reduces computational complexity
+\cite{frantar2023gptqaccurateposttrainingquantization}.
+
+The method further processes consecutive columns in blocks and delays
+updates to weights outside the current block until the block has been
+quantized. These lazy batch updates convert many small memory-bound
+operations into larger matrix operations that execute more efficiently
+on a GPU. A Cholesky-based reformulation of the damped inverse Hessian
+is additionally used to improve numerical stability when quantizing
+large layers. Together, fixed-order processing, block-wise updates and
+the Cholesky reformulation enable GPTQ to retain second-order error
+compensation while scaling substantially beyond the model sizes
+supported by earlier reconstruction-based quantizers.
+
+GPTQ is compatible with different quantization grids and granularities.
+For example, independent quantization parameters may be assigned to
+groups of consecutive weights, allowing local weight ranges to be
+represented more accurately than with a single grid for an entire row.
+Smaller groups can improve low-bit reconstruction quality, particularly
+at 3-bit and 4-bit precision, although they increase the number of
+scales and other metadata stored alongside the packed weights.
+
+The principal strength of GPTQ is therefore its ability to combine
+layer-output-aware reconstruction with practical scalability. The
+original study demonstrated accurate 3-bit and 4-bit weight
+quantization for model families extending to hundreds of billions of
+parameters \cite{frantar2023gptqaccurateposttrainingquantization}. However, GPTQ remains principally a weight-only method: runtime activations and the KV cache are not reduced by the core algorithm. Its output reconstruction also depends on
+activation statistics collected from a calibration dataset, making the
+representativeness of those samples relevant to the resulting
+quantized model.
+
+A further distinction must be made between compression and execution
+speed. GPTQ can substantially reduce the amount of weight data stored
+and transferred, but realised inference acceleration depends on the
+availability of kernels that can load packed low-bit weights and
+efficiently combine them with higher-precision activations. The
+algorithm should therefore be evaluated both as a method for preserving
+model quality after weight compression and as a representation whose
+runtime benefit depends on the supporting execution backend.
 
 \subsection{\ac{AWQ}}
 
