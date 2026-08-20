@@ -264,6 +264,137 @@ model quality after weight compression and as a representation whose
 runtime benefit depends on the supporting execution backend.
 
 \subsection{\ac{AWQ}}
+\ac{AWQ} is a hardware-oriented weight-only post-training quantization
+method developed for low-bit LLM inference. Its central observation is
+that weight values are not equally important to model behaviour.
+Experiments reported in the original work showed that protecting a
+small fraction of salient weight channels can substantially reduce the
+quality degradation caused by aggressive low-bit quantization
+\cite{lin2024awq}.
+
+AWQ determines salience using the distribution of the input
+activations rather than the magnitude of the weights alone. Weight
+channels receiving consistently large-magnitude activation features
+have a greater influence on the corresponding linear-layer output and
+are therefore treated as more sensitive to quantization. This is why
+the method is described as \emph{activation-aware}, despite quantizing
+only model weights.
+
+One direct way to protect the salient channels would be to retain them
+in FP16 while quantizing the remaining weights. Although this
+mixed-precision strategy can preserve model quality, irregularly
+interleaving floating-point and low-bit weights is difficult to execute
+efficiently on conventional hardware. AWQ therefore protects salient
+channels through an equivalent scaling transformation while retaining a
+uniform low-bit weight representation.
+
+For a linear layer with weight matrix \(\mathbf{W}\), input
+activations \(\mathbf{X}\) and positive per-input-channel scale vector
+\(\mathbf{s}\), the full-precision operation can be rewritten as
+
+\begin{equation}
+\mathbf{Y}
+=
+\mathbf{W}\mathbf{X}
+=
+\left(
+\mathbf{W}\operatorname{diag}(\mathbf{s})
+\right)
+\left(
+\operatorname{diag}(\mathbf{s})^{-1}\mathbf{X}
+\right).
+\label{eq:awq-equivalent-scaling}
+\end{equation}
+
+Equation~\eqref{eq:awq-equivalent-scaling} is mathematically equivalent
+before quantization: scaling an input channel of the weight matrix can
+be cancelled by inversely scaling the corresponding activation
+channel. Once the transformed weights are quantized, however, scaling
+up an important weight channel can reduce its relative rounding error.
+The inverse activation scale may generally be fused into an adjacent
+normalisation or preceding operation, avoiding an explicit additional
+runtime multiplication.
+
+AWQ selects the scaling vector by minimising the difference between the
+full-precision and quantized layer outputs:
+
+\begin{equation}
+\mathbf{s}^{*}
+=
+\underset{\mathbf{s}}{\operatorname{arg\,min}}
+\left\|
+Q\left(
+\mathbf{W}\operatorname{diag}(\mathbf{s})
+\right)
+\left(
+\operatorname{diag}(\mathbf{s})^{-1}\mathbf{X}
+\right)
+-
+\mathbf{W}\mathbf{X}
+\right\|_{F}^{2},
+\label{eq:awq-scaling-objective}
+\end{equation}
+
+where \(Q(\cdot)\) denotes the selected low-bit weight quantizer. The
+search is constrained using the per-channel average activation
+magnitude \(\mathbf{s}_{X}\), with candidate scales parameterised as
+
+\begin{equation}
+\mathbf{s}
+=
+\mathbf{s}_{X}^{\alpha},
+\qquad
+\alpha^{*}
+=
+\underset{\alpha\in[0,1]}{\operatorname{arg\,min}}
+\mathcal{L}\left(\mathbf{s}_{X}^{\alpha}\right).
+\label{eq:awq-scale-search}
+\end{equation}
+
+The scalar parameter \(\alpha\) controls the balance between protecting
+salient and non-salient channels. An overly aggressive scale can reduce
+the relative error of important channels while increasing the
+quantization range and error experienced by other weights. AWQ
+therefore performs a small grid search over \(\alpha\) and additionally
+applies weight clipping to reduce quantization error
+\cite{lin2026awqactivationawareweightquantization}.
+
+Unlike GPTQ, AWQ does not sequentially reconstruct the weights using an
+inverse Hessian and does not require backpropagation. The calibration
+data are used primarily to estimate simple per-channel activation
+statistics and to evaluate candidate scaling factors. The authors argue
+that this reduced dependence on direct layer reconstruction limits
+overfitting to the calibration samples and improves transfer across
+tasks, domains and modalities \cite{lin2026awqactivationawareweightquantization}. This represents an
+important methodological contrast with second-order
+reconstruction-based quantization.
+
+The practical deployment of AWQ also depends on the runtime system. The
+associated TinyChat implementation uses packed low-bit weights,
+on-the-fly dequantization, platform-aware data layouts and kernel fusion
+to translate the reduced weight representation into measured inference
+speedups. This demonstrates that the quality of the quantization
+algorithm and the efficiency of the execution backend are related but
+distinct aspects of low-bit deployment.
+
+The principal advantage of AWQ is that it provides an activation-aware
+mechanism for protecting important features while retaining a regular
+low-bit weight format. It avoids the irregularity of explicitly keeping
+selected weights at higher precision and avoids the computational cost
+of GPTQ-style second-order reconstruction. However, AWQ remains a
+weight-only method: activations and the KV cache are retained at higher
+precision in a conventional W4A16 configuration. Its benefits therefore
+primarily concern static weight storage and weight-loading bandwidth,
+rather than compression of every tensor involved in LLM inference.
+
+In addition, the quality of the selected scales still depends on the
+activation statistics observed during calibration. AWQ reduces this
+dependence to relatively simple channel-wise measurements, but a
+calibration distribution that is not representative of deployment
+inputs may still identify suboptimal channel importance. The realised
+runtime benefit also requires packed representations and appropriate
+kernels; a dense quantize--dequantize implementation would not fully
+reflect the performance potential reported for the complete AWQ system.
 
 \subsection{Critical comparison of weight-only approaches}
 
