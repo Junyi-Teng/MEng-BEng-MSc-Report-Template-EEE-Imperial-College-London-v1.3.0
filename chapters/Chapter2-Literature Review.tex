@@ -72,7 +72,7 @@ calibration dataset to estimate the numerical ranges and statistical
 properties of the tensors being quantized. These observations may be
 used to determine scale factors, clipping thresholds, zero-points or
 other quantizer parameters. Model weights are fixed after training and
-can therefore be analysed and quantized offline. Activations, by
+can therefore be analysed and quantized offline\cite{11158258}. Activations, by
 contrast, depend on the current input and may use either scales
 estimated during calibration or dynamically calculated runtime scales.
 The calibration data should be representative of the intended model
@@ -80,8 +80,76 @@ inputs, but must remain separate from the data used for final
 evaluation.
 
 \subsection{Scalar, group-wise and vector quantization}
+Scalar and vector quantization differ primarily in the number of values
+represented jointly, whereas group-wise quantization describes the
+granularity over which quantization parameters are shared. In scalar
+quantization, each tensor element is mapped independently to a discrete
+reconstruction level. The affine quantizer introduced in
+Equations~\eqref{eq:uniform-quantization}
+and~\eqref{eq:uniform-dequantization} is an example of scalar
+quantization: each real-valued element is represented by an integer code
+together with the scale and zero-point required for reconstruction
+\cite{jacob2017quantizationtrainingneuralnetworks}. This formulation is
+computationally convenient and maps naturally onto integer and
+mixed-precision hardware, but its accuracy depends strongly on how well
+the selected quantization parameters represent the numerical range of
+the tensor.
 
-\subsection{Quantization of weights, activations and KV cache}
+The quantization parameters may be defined at different granularities.
+Per-tensor quantization uses a single scale and zero-point for an entire
+tensor, resulting in low metadata overhead but limited adaptation to
+local variations in magnitude. Per-channel quantization instead assigns
+separate parameters to individual output or input channels. Group-wise
+quantization provides an intermediate design by partitioning a tensor
+into smaller groups, with each group using its own quantization
+parameters. A smaller group size can represent local tensor ranges more
+accurately, particularly when different regions of the tensor have
+substantially different magnitudes. However, it also increases the
+number of scales, zero-points or other auxiliary values that must be
+stored and processed. Fine-grained group-wise quantization has therefore
+been used in Transformer quantization systems such as ZeroQuant to
+balance numerical accuracy, metadata overhead and hardware efficiency
+\cite{yao2022zeroquantefficientaffordableposttraining}.
+
+Vector quantization jointly represents a block of \(d\) values using a
+single codeword from a multidimensional codebook. For an input vector
+\(\mathbf{x}\in\mathbb{R}^{d}\) and a codebook
+\(\mathcal{C}\subset\mathbb{R}^{d}\), nearest-neighbour vector
+quantization may be expressed as
+
+\begin{equation}
+Q_{\mathrm{V}}(\mathbf{x})
+=
+\underset{\mathbf{c}\in\mathcal{C}}{\operatorname{arg\,min}}
+\left\|
+\mathbf{x}-\mathbf{c}
+\right\|_{2}^{2},
+\label{eq:vector-quantization}
+\end{equation}
+
+where the selected codeword \(Q_{\mathrm{V}}(\mathbf{x})\) provides the
+reconstruction of the complete input vector. Unlike scalar
+quantization, this representation can account for the joint geometry of
+multiple tensor elements when allocating reconstruction points.
+Consequently, vector quantization can offer a different
+rate--distortion trade-off from independently quantizing each element.
+Its practical use, however, requires storage or structured generation of
+the codebook, encoding of codeword indices, and an execution path capable
+of processing the resulting packed representation efficiently.
+
+Lattice quantization is a structured form of vector quantization in
+which the reconstruction points follow a regular geometric arrangement.
+This structure can avoid storing an unrestricted learned codebook and
+can provide efficient mathematical procedures for encoding and
+reconstruction. NestQuant applies this principle using nested lattices
+and low-dimensional vector blocks to quantize operands involved in
+matrix products \cite{savkin2025nestquantnestedlatticequantization}. The distinction between scalar and vector quantization is therefore central to this dissertation:
+GPTQ, AWQ, SmoothQuant and the project-specific W4A8 pipeline primarily
+employ scalar or group-wise representations, whereas NestQuant
+investigates a structured vector-quantization approach. The later
+method-specific sections examine how these alternative representations
+affect quantization error, effective storage and implementation
+complexity.
 
 
 \section{Weight-Only Post-Training Quantization}
