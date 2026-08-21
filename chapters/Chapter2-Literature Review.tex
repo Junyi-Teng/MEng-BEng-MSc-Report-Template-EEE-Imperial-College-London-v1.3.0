@@ -517,12 +517,251 @@ outlier problem, SmoothQuant, the W4A8 operating regime and the
 limitations of joint weight--activation quantization.
 
 \subsection{Activation outliers}
+Activation quantization presents a different challenge from weight
+quantization. Model weights remain fixed after training and can
+therefore be analysed, transformed and quantized offline. Activations,
+by contrast, are generated dynamically during inference and depend on
+the input sequence, token position and network layer. Their numerical
+ranges are consequently not known exactly before deployment, requiring
+activation scales either to be estimated from representative calibration
+data or to be calculated dynamically at runtime.
 
+A particularly important difficulty is the presence of
+large-magnitude activation outliers. Consider a signed symmetric
+\(b\)-bit quantizer applied to an activation group
+\(\mathcal{G}\). Its scale may be defined as
+
+\begin{equation}
+s_{\mathcal{G}}
+=
+\frac{
+\displaystyle\max_{x\in\mathcal{G}} |x|
+}{
+2^{b-1}-1
+},
+\label{eq:activation-outlier-scale}
+\end{equation}
+
+where \(2^{b-1}-1\) is the largest positive integer code available to
+the quantizer. As indicated by
+Equation~\eqref{eq:activation-outlier-scale}, the largest-magnitude
+value within the selected group determines the spacing between adjacent
+reconstruction levels. If only a small number of activation values are
+substantially larger than the remainder of the distribution, the scale
+must nevertheless be sufficiently large to represent them.
+
+This enlarged scale reduces the effective resolution available to the
+majority of non-outlier values. Values concentrated near zero occupy
+only a small portion of the representable integer range, and multiple
+distinct high-precision activations may consequently be mapped to the
+same or neighbouring integer codes. Activation outliers can therefore
+increase quantization error across an entire tensor or quantization
+group even when the outlying values themselves constitute only a small
+fraction of the activations
+\cite{xiao2023icml-smoothquant}.
 
 \subsection{SmoothQuant}
+SmoothQuant is a training-free post-training quantization method
+designed to enable accurate W8A8 inference for large language models.
+Its central observation is that activation outliers are often
+concentrated in persistent input channels, whereas model weights are
+fixed and can be transformed offline. SmoothQuant therefore reduces
+the channel-wise variation of the activations by transferring part of
+the quantization difficulty to the corresponding weight channels
+\cite{xiao2023smoothquant}.
 
+For a linear layer represented using the convention
+\(\mathbf{Y}=\mathbf{W}\mathbf{X}\), a positive diagonal scaling matrix
+\(\mathbf{S}=\operatorname{diag}(\mathbf{s})\) gives the equivalent
+transformation
+
+\begin{equation}
+\mathbf{Y}
+=
+\mathbf{W}\mathbf{X}
+=
+\left(\mathbf{W}\mathbf{S}\right)
+\left(\mathbf{S}^{-1}\mathbf{X}\right).
+\label{eq:smoothquant-equivalent-scaling}
+\end{equation}
+
+Before quantization, Equation~\eqref{eq:smoothquant-equivalent-scaling}
+does not change the output of the layer. After the transformation,
+however, the scaled activations
+\(\mathbf{S}^{-1}\mathbf{X}\) have a smaller channel-wise dynamic range,
+while the corresponding weight columns become larger. Since the
+weights can be analysed and quantized offline, this redistribution makes
+the runtime activations more suitable for INT8 quantization.
+
+SmoothQuant determines the scale for input channel \(j\) using the
+maximum magnitudes of the corresponding activation and weight channels:
+
+\begin{equation}
+s_j
+=
+\frac{
+\left(
+\max |\mathbf{X}_{j,:}|
+\right)^{\alpha}
+}{
+\left(
+\max |\mathbf{W}_{:,j}|
+\right)^{1-\alpha}
+},
+\qquad
+0\leq\alpha\leq1,
+\label{eq:smoothquant-scale}
+\end{equation}
+
+where \(\alpha\) controls how much quantization difficulty is migrated
+from the activations to the weights. A larger value of \(\alpha\)
+generally smooths activation outliers more aggressively, but also
+increases the numerical range of the transformed weights. The selected
+value must therefore balance activation and weight quantization error.
+
+The channel-wise transformation can be calculated using a representative
+calibration dataset and folded into the model parameters or adjacent
+normalisation operations. It consequently avoids the separate
+higher-precision outlier path used by mixed-precision approaches such as
+LLM.int8(), allowing the smoothed model to use a more regular W8A8
+execution path. The weights are quantized offline, while activations may
+be dynamically quantized at runtime using token-dependent scales.
+
+The principal advantage of SmoothQuant is that it enables joint
+weight--activation quantization without retraining and without
+irregularly separating outlier channels. Its effectiveness nevertheless
+depends on representative calibration statistics and on the choice of
+\(\alpha\). Excessive smoothing can make the transformed weights more
+difficult to quantize, while insufficient smoothing leaves substantial
+activation outliers. In addition, conventional SmoothQuant does not
+reduce KV-cache precision, and its practical speed benefit depends on
+the availability of efficient INT8 kernels.
+
+SmoothQuant therefore provides the principal W8A8 reference in this
+dissertation. It extends the quantization scope beyond the weight-only
+GPTQ and AWQ configurations, while retaining a more conservative
+activation precision than the W4A4 configurations considered later for
+NestQuant.
 
 \subsection{Low-bit \ac{W4A8}-related approaches}
+\ac{W4A8} denotes a mixed-precision configuration in which model
+weights are represented using 4 bits and runtime activations using
+8 bits. It is therefore a precision regime rather than a single
+quantization algorithm. Conceptually, W4A8 combines the stronger
+weight compression of W4A16 with the broader low-precision execution
+scope of W8A8. However, reducing the weights from 8 bits to 4 bits
+introduces substantially greater weight-quantization error, while
+activation outliers must still be controlled during runtime.
 
+FPTQ directly investigates post-training W4A8 quantization for large
+language models. It combines fine-grained weight quantization with
+layer-dependent activation strategies, including logarithmic
+equalisation for layers that are particularly difficult to quantize. This work demonstrates that W4A8 generally requires
+more specialised treatment than simply replacing the W8 weights of a
+W8A8 model with a conventional 4-bit quantizer.
 
-\subsection{Limitations of joint W/A quantization}
+Other studies address the same precision regime through alternative
+numerical representations. ZeroQuant-FP investigates FP4 weights and
+FP8 activations, together with constrained weight scaling and
+low-rank compensation, to reduce the degradation introduced by W4A8
+quantization LQER instead combines activation-induced
+scaling with a low-rank approximation of the quantization error,
+allowing part of the error discarded by the 4-bit weight representation
+to be reconstructed through an additional low-rank path.
+
+These methods illustrate that the main challenge of W4A8 is not the
+notation itself, but the coordination of weight quantization,
+activation-range control and error reconstruction. Compared with
+W8A8, W4A8 can reduce static weight storage further, but usually
+requires finer weight granularity, improved scaling or an auxiliary
+error-correction mechanism to maintain model quality. Compared with
+W4A16, it additionally introduces input-dependent activation
+quantization and its associated runtime overhead.
+
+The systems benefit of W4A8 also depends on hardware and kernel support.
+Four-bit weights may need to be unpacked, rescaled or converted before
+they can be combined with 8-bit activations. Consequently, a W4A8
+checkpoint can provide substantial storage compression without
+automatically producing an equivalent latency improvement. Efficient
+deployment requires an execution path capable of consuming the packed
+weight representation while avoiding excessive quantization,
+dequantization and precision-alignment overhead.
+
+In this dissertation, W4A8 refers to the project-specific pipeline that
+combines packed 4-bit weights with dynamically quantized 8-bit
+activations. It is included as an intermediate operating point between
+weight-only W4A16 quantization and the broader low-precision
+configurations considered for NestQuant. The detailed calibration,
+packing and execution procedures used by this implementation are
+described in Chapter~3 rather than in the present literature review.
+
+\subsection{Limitations of Joint Weight--Activation Quantization}
+\label{subsec:joint-wa-limitations}
+
+Joint weight--activation quantization extends low-precision
+representation beyond static model parameters and can reduce memory
+traffic across a larger fraction of the inference data path. However,
+it is also more difficult than weight-only quantization because errors
+are introduced into both fixed weights and input-dependent activations.
+These errors may interact and accumulate across successive Transformer
+layers, particularly when weight precision is reduced to 4 bits.
+
+A principal limitation is the dynamic nature of activation
+distributions. Calibration data can estimate typical activation ranges,
+but cannot reproduce every sequence encountered during deployment.
+Persistent outlier channels may therefore remain difficult to represent
+using a regular low-precision range. SmoothQuant reduces this difficulty
+through channel-wise rescaling, while methods such as LLM.int8() retain
+selected outlier dimensions at higher precision
+\cite{xiao2023smoothquant,dettmers2022gpt3int8}. Neither approach
+eliminates the underlying dependence on representative activation
+statistics.
+
+The numerical challenge becomes greater in W4A8 configurations.
+Compared with W8A8, reducing the weights to 4 bits provides stronger
+parameter compression but leaves fewer reconstruction levels available
+for each weight group. Existing W4A8 methods consequently employ
+fine-grained scaling, layer-dependent treatment or auxiliary
+error-reconstruction mechanisms to preserve model quality
+\cite{li2023fptq,wu2023zeroquantfp,zhang2024lqer}. This increases
+calibration and implementation complexity and may require sensitive
+layers to remain at higher precision.
+
+A second limitation concerns runtime efficiency. Dynamic activation
+quantization requires scales to be calculated during inference, while
+packed low-bit weights must be unpacked, rescaled or consumed by a
+specialised matrix-multiplication kernel. If the execution path performs
+
+\[
+\text{quantization}
+\rightarrow
+\text{dequantization}
+\rightarrow
+\text{higher-precision matrix multiplication},
+\]
+
+the additional conversion cost may offset part of the bandwidth benefit.
+Consequently, a smaller checkpoint or lower nominal bit width does not
+automatically imply lower latency or energy consumption. The realised
+benefit depends on hardware support, data layout, kernel fusion and the
+ability to operate directly on the quantized representation.
+
+Joint weight--activation methods also leave other components of the
+inference-memory footprint unchanged. Conventional W8A8 and W4A8
+configurations normally retain the \ac{KV} cache at higher precision.
+Their benefits therefore concern model parameters and activation
+processing, but do not directly reduce cache memory that grows with
+context length and batch size.
+
+Finally, published W4A8 and W8A8 results are often obtained using
+different numerical formats, quantization granularities, calibration
+datasets and execution backends. Comparisons based only on nominal bit
+width or reported latency may therefore be misleading. Model quality,
+effective storage, quantization scope and kernel maturity must be
+considered together.
+
+These limitations motivate methods that use alternative low-bit
+representations and extend quantization to a broader set of inference
+tensors. The following sections therefore examine structured vector and
+lattice quantization, including NestQuant and its application to
+weights, activations and the \ac{KV} cache.
