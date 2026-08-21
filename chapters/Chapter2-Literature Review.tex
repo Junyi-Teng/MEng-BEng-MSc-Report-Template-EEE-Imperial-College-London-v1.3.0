@@ -1,6 +1,6 @@
 \doublespacing % Do not change - required
 
-\chapter{Literature review}
+\chapter{Literature Review}
 \label{ch2}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -152,6 +152,7 @@ affect quantization error, effective storage and implementation
 complexity.
 
 
+
 \section{Weight-Only Post-Training Quantization}
 
 Weight-only \ac{PTQ} reduces model storage and memory traffic by quantizing pretrained weights while retaining activations and the \ac{KV} cache at higher precision, with \acs{GPTQ} and \acs{AWQ} representing two influential approaches for limiting the resulting degradation in model quality.
@@ -162,7 +163,7 @@ designed to preserve the behaviour of large Transformer models at low
 weight precision. It extends the second-order quantization principles of
 Optimal Brain Compression, which in turn adapts the Optimal Brain
 Surgeon framework to post-training weight quantization
-\cite{frantar2022obc,frantar2023gptq}. Rather than minimising the
+\cite{frantar2023gptqaccurateposttrainingquantization}. Rather than minimising the
 element-wise difference between the original and quantized weights,
 GPTQ quantizes each linear layer by attempting to preserve its output
 over a small calibration dataset.
@@ -270,7 +271,7 @@ that weight values are not equally important to model behaviour.
 Experiments reported in the original work showed that protecting a
 small fraction of salient weight channels can substantially reduce the
 quality degradation caused by aggressive low-bit quantization
-\cite{lin2024awq}.
+\cite{lin2026awqactivationawareweightquantization}.
 
 AWQ determines salience using the distribution of the input
 activations rather than the magnitude of the weights alone. Weight
@@ -369,14 +370,6 @@ tasks, domains and modalities \cite{lin2026awqactivationawareweightquantization}
 important methodological contrast with second-order
 reconstruction-based quantization.
 
-The practical deployment of AWQ also depends on the runtime system. The
-associated TinyChat implementation uses packed low-bit weights,
-on-the-fly dequantization, platform-aware data layouts and kernel fusion
-to translate the reduced weight representation into measured inference
-speedups. This demonstrates that the quality of the quantization
-algorithm and the efficiency of the execution backend are related but
-distinct aspects of low-bit deployment.
-
 The principal advantage of AWQ is that it provides an activation-aware
 mechanism for protecting important features while retaining a regular
 low-bit weight format. It avoids the irregularity of explicitly keeping
@@ -387,19 +380,141 @@ precision in a conventional W4A16 configuration. Its benefits therefore
 primarily concern static weight storage and weight-loading bandwidth,
 rather than compression of every tensor involved in LLM inference.
 
-In addition, the quality of the selected scales still depends on the
-activation statistics observed during calibration. AWQ reduces this
-dependence to relatively simple channel-wise measurements, but a
-calibration distribution that is not representative of deployment
-inputs may still identify suboptimal channel importance. The realised
-runtime benefit also requires packed representations and appropriate
-kernels; a dense quantize--dequantize implementation would not fully
-reflect the performance potential reported for the complete AWQ system.
-
 \subsection{Critical comparison of weight-only approaches}
+GPTQ and AWQ share the objective of reducing the storage and
+memory-bandwidth requirements associated with model weights while
+retaining higher-precision activations and KV-cache tensors. They
+therefore represent broadly comparable weight-only operating points,
+commonly evaluated in W4A16 configurations. Their underlying
+optimisation principles, however, are substantially different. GPTQ
+formulates quantization as a layer-output reconstruction problem and
+uses approximate second-order information to compensate for the error
+introduced by sequential rounding. AWQ instead uses activation
+magnitudes to identify salient weight channels and protects these
+channels through equivalent scaling and clipping. GPTQ is consequently
+reconstruction-aware, whereas AWQ is primarily salience- and
+scaling-aware.
 
+This distinction produces different calibration and computational
+requirements. GPTQ requires representative layer inputs from which an
+approximate Hessian is constructed, together with matrix factorisation
+and block-wise error updates during quantization. AWQ uses the
+calibration activations principally to estimate channel importance and
+to evaluate a comparatively small set of candidate scaling and clipping
+parameters. GPTQ therefore tends to incur a higher offline quantization
+cost, while AWQ favours a simpler and more regular procedure. However,
+neither method is independent of calibration data: unrepresentative
+samples may produce inaccurate second-order statistics in GPTQ or
+suboptimal channel-importance estimates in AWQ.
+
+Although GPTQ and AWQ both target low-bit weight-only inference, they
+use calibration information in fundamentally different ways. GPTQ
+formulates quantization as a layer-output reconstruction problem and
+uses approximate second-order information to compensate for sequential
+rounding errors. AWQ instead identifies activation-salient channels and
+protects them through equivalent scaling and clipping. Their principal
+methodological and deployment differences are summarized in Table~\ref{tab:gptq-awq-comparison}.
+\begin{table}[htbp]
+\centering
+\caption{Condensed comparison of GPTQ and AWQ.}
+\label{tab:gptq-awq-comparison}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.20}
+\setlength{\tabcolsep}{5pt}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.20\textwidth}
+>{\raggedright\arraybackslash}X
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Criterion}
+&
+\textbf{\acs{GPTQ}}
+&
+\textbf{\acs{AWQ}}
+\\
+\midrule
+
+Core principle
+&
+Layer-output reconstruction using approximate second-order error
+compensation.
+&
+Activation-aware scaling and clipping of salient weight channels.
+\\
+
+Calibration and optimisation
+&
+Uses representative layer inputs and an approximate Hessian; no
+backpropagation is required.
+&
+Uses per-channel activation magnitudes and a small scaling search; no
+backpropagation is required.
+\\
+
+Scope and typical regime
+&
+Weight-only; commonly W3A16 or W4A16.
+&
+Weight-only; commonly W4A16.
+\\
+
+Offline quantization cost
+&
+Higher, owing to Hessian construction, factorisation and sequential
+error updates.
+&
+Lower, owing mainly to activation-statistic collection, scale search
+and clipping.
+\\
+
+Runtime requirements
+&
+Requires efficient packed low-bit weight kernels operating with
+higher-precision activations.
+&
+Requires packed weight layouts, efficient dequantization and suitable
+kernel fusion.
+\\
+
+Main trade-off
+&
+Provides strong layer-output reconstruction, but has a higher offline
+quantization cost and does not compress activations or the KV cache.
+&
+Provides a simpler and more hardware-regular procedure, but lacks
+explicit second-order reconstruction and does not compress activations
+or the KV cache.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
 
 \section{Weight–Activation Quantization}
+
+Weight--activation \ac{PTQ} extends low-precision representation from
+the static model parameters to the dynamically generated activations
+used during inference. Compared with weight-only quantization, this
+broader scope can reduce memory traffic across a larger fraction of the
+linear-layer data path and can enable integer or mixed-precision matrix
+multiplication when suitable kernels are available. However, activation
+quantization is more difficult because activation values depend on the
+current input and may contain persistent large-magnitude outliers.
+Methods such as ZeroQuant and SmoothQuant therefore introduce
+fine-grained quantization, distribution transformation and specialised
+runtime support to enable practical W8A8 inference
+\cite{yao2022zeroquantefficientaffordableposttraining,
+xiao2023smoothquant}. The following subsections review the activation
+outlier problem, SmoothQuant, the W4A8 operating regime and the
+limitations of joint weight--activation quantization.
 
 \subsection{Activation outliers}
 
