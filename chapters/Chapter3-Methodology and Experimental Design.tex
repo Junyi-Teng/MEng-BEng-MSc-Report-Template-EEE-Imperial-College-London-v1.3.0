@@ -180,8 +180,8 @@ quantization scope.
 \end{table}
 
 
-\subsection{Data, Computing Environment and Baseline}
-\label{subsec:data-environment-baseline}
+\subsection{Calibration Data}
+\label{subsec:calibration data}
 Two datasets were used for calibration and evaluation in this project:
 UltraChat and WikiText-2. Their roles were deliberately separated
 because post-training quantization requires representative data for
@@ -322,9 +322,229 @@ WikiText-2 protocol.
 \end{table}
 \section{Quantization Pipelines}
 \label{sec:quantization-pipelines}
+The quantization methods reviewed in Chapter~2 were implemented as
+separate experimental pipelines around the same
+Llama-3.2-3B-Instruct base model. The pipelines differ not only in
+nominal bit width, but also in quantization scope, calibration strategy,
+tensor representation and runtime execution path. AWQ and SmoothQuant
+were used as reference implementations for weight-only and joint
+weight--activation quantization, respectively. A project-specific W4A8
+pipeline was then developed to investigate a more aggressive mixed-bit
+operating point, while NestQuant extended the study to structured
+vector quantization of weights, activations and the KV cache.
 
 \subsection{Reference Pipelines: \acs{AWQ} and SmoothQuant}
 \label{subsec:reference-pipelines}
+AWQ was implemented as the weight-only reference pipeline using
+Llama-3.2-3B-Instruct as the source model. The local quantization script
+loaded the pretrained model in FP16 and applied a one-shot
+post-training quantization procedure using the \texttt{llmcompressor}
+implementation. UltraChat was used as the calibration source, with
+samples drawn from the \texttt{train\_sft} split. Each conversation was
+normalised into user--assistant messages and rendered using the native
+Llama chat template before calibration.
+
+The retained configuration used 64 calibration samples with a maximum
+sequence length of 512 tokens. Quantization was applied through an
+\texttt{AWQModifier} followed by a \texttt{QuantizationModifier} using
+the W4A16 scheme. All eligible \texttt{Linear} modules were targeted,
+while the tied language-model head, \texttt{lm\_head}, was explicitly
+excluded. Activations were therefore not quantized by this pipeline and
+remained at higher precision during inference.
+
+The complete local procedure is illustrated in
+Figure~\ref{fig:awq-pipeline}. The process begins from the common
+full-precision model, prepares the UltraChat calibration conversations,
+applies AWQ-based weight transformation and W4A16 quantization, and
+finally serialises the resulting model as a compressed checkpoint.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {imgs/awq-pipeline.png}
+    \caption{AWQ W4A16 quantization pipeline implemented in this project.}
+    \label{fig:awq-pipeline}
+\end{figure}
+
+The AWQ configuration serves as the principal weight-only reference in
+the experimental framework. Because the core pipeline modifies model
+weights while leaving runtime activations unquantized, it provides a
+useful comparison point for the broader W8A8 and W4A8 pipelines
+described subsequently.The principal configuration of AWQ is summarised in
+Table~\ref{tab:awq-pipeline}.
+
+\begin{table}[htbp]
+\centering
+\caption{Configuration of the AWQ reference pipeline.}
+\label{tab:awq-pipeline}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.25}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.28\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Configuration}
+&
+\textbf{Setting}
+\\
+\midrule
+
+Source model
+&
+Llama-3.2-3B-Instruct.
+\\
+
+Precision regime
+&
+W4A16.
+\\
+
+Calibration dataset
+&
+UltraChat \texttt{train\_sft}.
+\\
+
+Calibration setting
+&
+64 samples with a maximum sequence length of 512 tokens.
+\\
+
+Quantization scope
+&
+Eligible Linear modules throughout the 28 decoder layers.
+\\
+
+Excluded module
+&
+\texttt{lm\_head}.
+\\
+
+Output
+&
+Compressed weight-quantized checkpoint with higher-precision
+activations retained for inference.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+The complete SmoothQuant implementation used in this project is
+illustrated in Figure~\ref{fig:smoothquant-pipeline}. The pipeline is
+divided into an offline calibration and smoothing stage and a runtime
+W8A8 inference stage. During calibration, representative UltraChat
+samples are used to collect activation statistics and determine the
+channel-wise smoothing transformation. The transformed weights are then
+represented at INT8 precision, while input activations are dynamically
+quantized on a per-token basis during inference. The implementation
+also shares activation quantization between projections that consume
+the same hidden-state tensor, reducing redundant runtime quantization
+operations.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {imgs/smoothquant-pipeline.png}
+    \caption{SmoothQuant W8A8 quantization and runtime inference pipeline.}
+    \label{fig:smoothquant-pipeline}
+\end{figure}
+
+In contrast to the AWQ configuration which reduces only the precision of the model weights, the SmoothQuant pipeline applies low-precision representation to both
+weights and runtime activations. The implementation therefore provides
+a reference point for evaluating the effect of extending quantization
+from a W4A16 weight-only configuration to a W8A8 execution regime.
+
+Representative activation statistics are first collected from the
+UltraChat \texttt{train\_sft} calibration split. These statistics will be used to redistribute the part of the activation-range difficulty into the corresponding weight channels before low-precision execution.
+
+Following smoothing, the target Linear projections are represented
+using 8-bit weights, while their input activations are dynamically
+quantized to INT8 during inference. Activation quantization is performed
+on a per-token basis so that the quantization scale can adapt to the
+numerical range of each runtime input. The resulting W8A8 Linear
+operations were implemented using custom Triton kernels rather than
+being evaluated only through an offline fake-quantization procedure.
+
+To reduce redundant runtime quantization, projections consuming the
+same hidden-state tensor were grouped where appropriate. In particular,
+the query, key and value projections share one activation-quantization
+operation, while the gate and up projections similarly share their
+quantized input. This preserves the same numerical input for the
+associated projections while reducing repeated activation-processing
+overhead.
+
+The principal configuration of the SmoothQuant pipeline is summarised
+in Table~\ref{tab:smoothquant-pipeline}.
+\begin{table}[htbp]
+\centering
+\caption{SmoothQuant experimental configuration.}
+\label{tab:smoothquant-pipeline}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.25}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.28\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Configuration}
+&
+\textbf{Setting}
+\\
+\midrule
+
+Source model
+&
+Llama-3.2-3B-Instruct.
+\\
+
+Precision regime
+&
+W8A8.
+\\
+
+Calibration dataset
+&
+UltraChat \texttt{train\_sft}.
+\\
+
+Smoothing parameter
+&
+\(\alpha = 0.8\).
+\\
+
+Weight precision
+&
+INT8 following SmoothQuant channel-wise transformation.
+\\
+
+Activation quantization
+&
+Dynamic per-token INT8.
+\\
+
+Runtime implementation
+&
+Custom Triton W8A8 Linear kernels with shared activation
+quantization where applicable.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
 
 
 
