@@ -1,13 +1,342 @@
+\chapter{Methodology and Experimental Design}
+\label{ch:methodology}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% IMPORTANT
+\begin{spacing}{1}
+\minitoc
+\end{spacing}
+\thesisspacing
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 \section{Methodological Overview}
+\label{sec:methodological-overview}
+The experimental framework considers four principal quantization
+routes. AWQ is used as a representative weight-only W4A16 approach,
+while SmoothQuant provides a W8A8 reference in which both weights and
+runtime activations are quantized. A project-specific W4A8 pipeline is
+implemented to investigate the combined effect of 4-bit weight
+compression and dynamic 8-bit activation quantization. NestQuant is
+then used to extend the quantization scope further through progressively
+broader configurations involving weights, activations and the KV cache.
+The overall methodology is summarised in Figure~\ref{fig:methodology-overview}.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {imgs/methodology-overview.png}
+    \caption{Overview of the methodology and experimental framework.}
+    \label{fig:methodology-overview}
+\end{figure}
+
 
 \section{Model and Experimental Context}
+\label{sec:model-experimental-context}
 \subsection{Base Model and Quantization Scope}
+\label{subsec:model-quantization-scope}
+Llama-3.2-3B-Instruct contains 28 Transformer decoder layers with a
+hidden dimension of 3,072 and an intermediate feed-forward dimension of
+8,192. The attention mechanism contains 24 attention heads and eight
+key--value heads, with a head dimension of 128\cite{meta2024llama32}. This architecture provides a sufficiently large model for weight storage, activation
+precision and KV-cache growth to represent meaningful deployment
+constraints, while remaining practical for repeated calibration and
+evaluation within the computational resources available to this
+project.
+The quantization scope was defined at the Linear-projection level.
+Within each decoder layer, seven weight matrices were treated as the
+principal quantization targets: the query, key, value and output
+projections in the attention block, together with the gate, up and down
+projections in the feed-forward network. This gives
+
+\begin{equation}
+N_{\mathrm{linear}}
+=
+28 \times 7
+=
+196
+\label{eq:target-linear-modules}
+\end{equation}
+
+target linear modules across the complete model. The resulting scope
+covers 2,818,572,288 weight elements. Table~\ref{tab:model-scope}
+summarises the principal model dimensions and the corresponding
+quantization treatment used throughout the experimental framework.
+
+\begin{table}[htbp]
+\centering
+\caption{Architecture and quantization scope of the
+Llama-3.2-3B-Instruct model used in this dissertation.}
+\label{tab:model-scope}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.25}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.32\textwidth}
+>{\raggedright\arraybackslash}p{0.22\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Model component}
+&
+\textbf{Configuration}
+&
+\textbf{Treatment}
+\\
+\midrule
+
+Base model
+&
+Llama-3.2-3B-Instruct
+&
+Common source model for all experiments.
+\\
+
+Original parameter precision
+&
+BF16
+&
+Retained as the full-precision reference.
+\\
+
+Decoder layers
+&
+28
+&
+All decoder layers included.
+\\
+
+Hidden dimension
+&
+3,072
+&
+Architecture unchanged.
+\\
+
+Intermediate dimension
+&
+8,192
+&
+Architecture unchanged.
+\\
+
+Attention heads / KV heads
+&
+24 / 8
+&
+Attention structure unchanged.
+\\
+
+Head dimension
+&
+128
+&
+Architecture unchanged.
+\\
+
+Attention projections
+&
+\(q\), \(k\), \(v\), \(o\)
+&
+Quantization targets in every decoder layer.
+\\
+
+Feed-forward projections
+&
+gate, up, down
+&
+Quantization targets in every decoder layer.
+\\
+
+Target Linear modules
+&
+196
+&
+Primary common quantization scope.
+\\
+
+Target weight elements
+&
+2,818,572,288
+&
+Subject to the method-specific low-bit representation.
+\\
+
+Embeddings, normalisation and
+other non-target tensors
+&
+Original precision
+&
+Preserved rather than included in the common Linear-layer
+quantization scope.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+
 \subsection{Data, Computing Environment and Baseline}
+\label{subsec:data-environment-baseline}
+Two datasets were used for calibration and evaluation in this project:
+UltraChat and WikiText-2. Their roles were deliberately separated
+because post-training quantization requires representative data for
+estimating quantization parameters, whereas final model quality should
+be assessed using data that are not used to optimise those parameters.
+The exact data protocol also differs between the reference
+AWQ/SmoothQuant/W4A8 pipelines and the NestQuant experiments.
 
+UltraChat was used primarily for the calibration and diagnostic
+evaluation of the AWQ, SmoothQuant and project-specific W4A8 pipelines.
+Calibration samples were drawn from the \texttt{train\_sft} split,
+while the retained diagnostic evaluations used the
+\texttt{test\_sft} split. For the latter, model quality was evaluated
+only over assistant-response tokens rather than over the complete
+conversation. This provides an instruction-following-oriented measure
+of language modelling quality while ensuring that prompt tokens do not
+dominate the reported loss.
+
+WikiText-2 was used for the NestQuant calibration and final
+language-model evaluation protocol. Contiguous sequences from the raw
+training split were used to collect the statistics required for
+sequential weight quantization, including the second-order information
+used by the QA-LDLQ procedure. The calibration sequence length was set
+to 2,048 tokens, consistent with the context length subsequently used
+for evaluation. Within the calibration process, separate fit and
+held-out windows were maintained: the fit windows were used to
+construct the quantization parameters, while the held-out windows were
+used to assess the resulting reconstruction objectives without
+contributing to parameter selection.Although both datasets are used within the same experimental framework,they serve different methodological purposes and employ different scoring procedures. Their principal differences are summarised in
+Table~\ref{tab:dataset-comparison}.
+\begin{table}[htbp]
+\centering
+\caption{Comparison of UltraChat and WikiText-2 within the experimental framework.}
+\label{tab:dataset-comparison}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.25}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.22\textwidth}
+>{\raggedright\arraybackslash}X
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Criterion}
+&
+\textbf{UltraChat}
+&
+\textbf{WikiText-2}
+\\
+\midrule
+
+Primary role
+&
+Calibration and diagnostic evaluation of AWQ, SmoothQuant and the
+project-specific W4A8 pipeline.
+&
+Calibration and matched final evaluation of the NestQuant pipeline.
+\\
+
+Data type
+&
+Instruction-following conversational data.
+&
+Contiguous natural-language text.
+\\
+
+Calibration split
+&
+\texttt{train\_sft}
+&
+Raw training split.
+\\
+
+Evaluation split
+&
+\texttt{test\_sft}
+&
+Validation split.
+\\
+
+Evaluation target
+&
+Assistant-response tokens only.
+&
+Contiguous validation tokens.
+\\
+
+Context handling
+&
+Conversation-based examples with response-token masking.
+&
+Fixed contiguous sequences with a context length of 2,048 tokens.
+\\
+
+Main use in calibration
+&
+Collection of activation statistics and method-specific quantization
+parameters.
+&
+Collection of second-order statistics and parameters required for
+sequential QA-LDLQ calibration.
+\\
+
+Held-out calibration data
+&
+Not used as a separate formal calibration-stage partition in the
+retained diagnostic protocol.
+&
+Separate fit and held-out calibration windows were maintained for
+parameter construction and reconstruction assessment.
+\\
+
+Main evaluation purpose
+&
+Implementation-level quality and runtime diagnostics.
+&
+Controlled comparison of BF16, W4A16KV16, W4A16KV4,
+W4A4KV16 and W4A4KV4.
+\\
+
+Direct PPL comparability
+&
+Comparable only with other configurations evaluated under the same
+UltraChat protocol.
+&
+Comparable only with configurations evaluated under the same
+WikiText-2 protocol.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
 \section{Quantization Pipelines}
+\label{sec:quantization-pipelines}
 
-\subsection{Reference Pipelines: AWQ and SmoothQuant}
-\subsection{Project-Specific W4A8 Pipeline}
+\subsection{Reference Pipelines: \acs{AWQ} and SmoothQuant}
+\label{subsec:reference-pipelines}
+
+
+
+\subsection{Project-Specific \acs{W4A8} Pipeline}
+\label{subsec:w4a8-pipeline}
+
+
+
 \subsection{NestQuant Pipeline}
+\label{subsec:nestquant-pipeline}
+
+
 
 \section{Evaluation, Verification and Reproducibility}
+\label{sec:evaluation-verification-reproducibility}
