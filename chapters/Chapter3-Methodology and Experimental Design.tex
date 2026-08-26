@@ -210,7 +210,7 @@ for evaluation. Within the calibration process, separate fit and
 held-out windows were maintained: the fit windows were used to
 construct the quantization parameters, while the held-out windows were
 used to assess the resulting reconstruction objectives without
-contributing to parameter selection.Although both datasets are used within the same experimental framework,they serve different methodological purposes and employ different scoring procedures. Their principal differences are summarised in
+contributing to parameter selection. Although both datasets are used within the same experimental framework,they serve different methodological purposes and employ different scoring procedures. Their principal differences are summarised in
 Table~\ref{tab:dataset-comparison}.
 \begin{table}[htbp]
 \centering
@@ -370,7 +370,7 @@ The AWQ configuration serves as the principal weight-only reference in
 the experimental framework. Because the core pipeline modifies model
 weights while leaving runtime activations unquantized, it provides a
 useful comparison point for the broader W8A8 and W4A8 pipelines
-described subsequently.The principal configuration of AWQ is summarised in
+described subsequently. The principal configuration of AWQ is summarised in
 Table~\ref{tab:awq-pipeline}.
 
 \begin{table}[htbp]
@@ -448,6 +448,7 @@ quantized on a per-token basis during inference. The implementation
 also shares activation quantization between projections that consume
 the same hidden-state tensor, reducing redundant runtime quantization
 operations.
+
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.95\textwidth]
@@ -551,7 +552,128 @@ quantization where applicable.
 \subsection{Project-Specific \acs{W4A8} Pipeline}
 \label{subsec:w4a8-pipeline}
 
+The project-specific W4A8 pipeline was developed to investigate a more
+aggressive joint weight--activation operating point than the W8A8
+SmoothQuant reference. W4A8 is used here to denote a precision regime
+rather than a standalone published quantization algorithm. The pipeline
+starts from the original floating-point Llama-3.2-3B-Instruct model
+and performs a joint calibration procedure in which candidate channel
+transformations are evaluated under both 4-bit weight quantization and
+dynamic 8-bit activation quantization.
 
+The central calibration procedure extends the activation-aware scaling
+ideas reviewed in Chapter~2. For each resolved Llama mapping, candidate
+channel scales are generated from two families: a SmoothQuant-style
+activation--weight formulation and an activation-only AWQ-style
+formulation. Each candidate is evaluated using a W4A8
+quantize--dequantize forward pass, and the scale that minimises the
+block-output mean-squared error is selected. The search therefore
+optimises the channel transformation against the intended joint W4A8
+numerical path rather than against weight quantization alone. The final configuration uses symmetric grouped INT4 weight quantization with a group size of 128 and symmetric dynamic per-token INT8 activation quantization. All eligible Linear modules are targeted, while \texttt{lm\_head} is excluded. The retained main configuration
+uses round-to-nearest (RTN) weight quantization after the channel-scale
+search; GPTQ support was implemented as an ablation, but it is not the
+weight quantizer used for the principal W4A8 results.The principal configuration is summarised in Table~\ref{tab:w4a8-pipeline}.
+
+\begin{table}[htbp]
+\centering
+\caption{Project-specific W4A8 experimental configuration.}
+\label{tab:w4a8-pipeline}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.25}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.28\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+
+\toprule
+\textbf{Configuration}
+&
+\textbf{Setting}
+\\
+\midrule
+
+Source model
+&
+Llama-3.2-3B-Instruct.
+\\
+
+Precision regime
+&
+W4A8.
+\\
+
+Calibration dataset
+&
+UltraChat \texttt{train\_sft}.
+\\
+
+Calibration setting
+&
+64 samples with a maximum sequence length of 512 tokens.
+\\
+
+Weight quantization
+&
+Symmetric grouped INT4 with group size 128.
+\\
+
+Activation quantization
+&
+Symmetric dynamic per-token INT8.
+\\
+
+Scale search
+&
+20 candidate scales drawn from SmoothQuant-style and
+activation-only families.
+\\
+
+Weight finalisation
+&
+Round-to-nearest (RTN).
+\\
+
+Quantization scope
+&
+All eligible Linear modules; \texttt{lm\_head} excluded.
+\\
+
+Checkpoint format
+&
+Packed INT4 weight representation.
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+After calibration, the compressed checkpoint stores the low-bit weight
+representation in packed form. At runtime, the implementation replaces
+the target Linear modules with an ATen packed-INT4 weight path. Dynamic
+activation quantization is applied using a custom Triton kernel on the
+incoming BF16 activations before the packed-weight matrix operation.
+
+The runtime also shares activation quantization between projections that
+consume the same hidden-state tensor. In the Llama attention block,
+the query, key and value projections can therefore reuse one dynamic A8
+quantization result, while the gate and up projections share another.
+This reduces redundant activation-processing operations without
+changing the selected activation precision policy. The entire process is shown in Block diagram \ref{fig:w4a8-pipeline}
+\begin{figure}[htbp]
+    \centering
+    \makebox[\textwidth][c]{%
+        \includegraphics[width=1.08\textwidth]
+        {imgs/w4a8-pipeline.png}%
+    }
+    \caption{Overview of the W4A8 pipeline.}
+    \label{fig:w4a8-pipeline}
+\end{figure}
 
 \subsection{NestQuant Pipeline}
 \label{subsec:nestquant-pipeline}
