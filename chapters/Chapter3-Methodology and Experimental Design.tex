@@ -14,22 +14,135 @@
 
 
 \section{Methodological Overview}
-The experimental framework contains four principal routes: \acro{AWQ} as
+The experimental framework contains four principal routes: \ac{AWQ} as
 a weight-only reference, SmoothQuant as a joint weight--activation
-reference, a project-specific \acro{W4A8} pipeline, and NestQuant as a
+reference, a project-specific \ac{W4A8} pipeline, and NestQuant as a
 structured low-bit method that extends the quantization scope to model
 weights, runtime activations and the key--value cache.
 
 \section{Model and Experimental Context}
-
-
 \subsection{Base Model and Quantization Scope}
+All experiments use Llama-3.2-3B-Instruct as the common source model. The architecture contains 28 Transformer decoder layers and 3072 hiddendimensions , an intermediate feed-forward dimension of 8,192,24 attention heads and eight key--value heads, with a head dimension of 128~\cite{meta2024llama32}. The source model is represented using BF16 parameters and provides the full-precision reference for the principal cross-method quality and memory comparisons.
 
+The common weight-quantization scope is defined at the Linear-projection level. Each decoder layer contains 7 target Linear modules: the query, key, value and output projections in the self-attention block, together with the gate, up and down projections in the feed-forward network. So the total number of target modules is 
+\begin{equation}
+N_{\mathrm{Linear}}
+=
+28 \times 7
+=
+196 .
+\label{eq:number-linear-modules}
+\end{equation}
+
+These modules contain 2,818,572,288 target weight elements. And normalization parameters, language-model heads and other non-target tensors remain outside the common Linear-layer quantization scope unless explicitly stated. The detailed information of the model will be shown in table \ref{tab:model-architecture-scope}.
+
+\begin{table}[htbp]
+\centering
+\caption{Architecture and common quantization scope of
+Llama-3.2-3B-Instruct.}
+\label{tab:model-architecture-scope}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.22}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.3\textwidth}
+>{\raggedright\arraybackslash}p{0.27\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+\toprule
+\textbf{Model component} &
+\textbf{Configuration} &
+\textbf{Treatment in this study} \\
+\midrule
+
+Base model &
+Llama-3.2-3B-Instruct &
+Common source checkpoint for all experiments. \\
+
+Source precision &
+BF16 &
+Retained as the principal full-precision reference. \\
+
+Decoder layers &
+28 &
+All decoder layers included. \\
+
+Hidden dimension &
+3,072 &
+Architecture unchanged. \\
+
+Intermediate dimension &
+8,192 &
+Architecture unchanged. \\
+
+Attention heads / KV heads &
+24 / 8 &
+Attention structure unchanged. \\
+
+Head dimension &
+128 &
+Architecture unchanged. \\
+
+Attention projections &
+\(q,k,v,o\) &
+Quantization targets in every decoder layer. \\
+
+Feed-forward projections &
+gate, up, down &
+Quantization targets in every decoder layer. \\
+
+Target Linear modules &
+196 &
+Common module scope for weight quantization. \\
+
+Target weight elements &
+2,818,572,288 &
+Subject to method-specific low-bit representation. \\
+
+Embeddings, normalization and other non-target tensors &
+Original precision &
+Retained outside the common Linear-layer scope. \\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
 
 \subsection{Calibration Data}
 
+UltraChat-200k was used as the data source for the calibration and
+evaluation procedures in this project. The dataset contains
+instruction-following conversations consisting of user and assistant
+turns. Calibration samples were drawn from the \texttt{train\_sft}
+split, while the \texttt{test\_sft} split was reserved for the common
+model-quality evaluation.
+
+The calibration procedure is different from the quantization pipelines. The retained AWQ, smooth quant and project-specific W4A8 configurations used 64 representative calibration conversations. NestQuant used the same UltraChat-based experimental framework with a 2,048-token context for its calibration procedure. For all pipelines, calibration data were kept separate from the \texttt{test\_sft} examples used for the final cross-method comparison. This separation prevents the evaluation data from contributing to the selection of quantization parameters and provides a consistent basis for comparing the low-precision configurations.
 
 \subsection{Common Evaluation Protocol}
+To provide a consistent basis for cross-method comparison, all principal
+model configurations were evaluated using the same held-out
+UltraChat-200k \texttt{test\_sft} split. The evaluation included the
+BF16 baseline together with AWQ, SmoothQuant, specific W4A8
+pipeline and the retained NestQuant configurations. Using a common test
+set ensures that differences in model quality are associated with the
+quantization configuration rather than with differences in evaluation
+data.
+
+The evaluation followed an assistant-response-only scoring protocol.
+User messages and preceding conversational turns were retained as model
+context, but only assistant-response tokens contributed to the reported
+negative log-likelihood and perplexity. The final prepared evaluation
+set contained 73,150 assistant responses and 4,500,809 scored assistant
+tokens. A maximum sequence length of 256 tokens and a maximum scored
+assistant-response length of 64 tokens were used, with a batch size of
+one. Three examples were processed as warm-up before measurement and
+were excluded from the timed evaluation. Dataset loading and
+tokenization were also excluded from the measured execution region.
 
 
 \section{Quantization Pipelines}
