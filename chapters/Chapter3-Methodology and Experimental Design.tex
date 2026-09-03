@@ -351,7 +351,7 @@ q_i^{(x)}
 
 So the resulting operating point is denoted W8A8KV16: both the target
 weights and runtime activations use 8-bit representations, while the
-key--value cache remains at 16-bit precision. Here is the entire process of smooth quant in Figure \ref{smoothquant-pipeline-visual}
+key--value cache remains at 16-bit precision. Here is the entire process of smooth quant in Figure \ref{fig:smoothquant-pipeline-visual}
 
 \begin{figure}[htbp]
     \centering
@@ -363,6 +363,57 @@ key--value cache remains at 16-bit precision. Here is the entire process of smoo
 
 \subsection{Project-Specific W4A8 Pipeline}
 
+
+The implementation of specific W4A8 starts from the same BF16
+Llama-3.2-3B-Instruct checkpoint used by the other quantization
+pipelines. The target scope consists of the query, key, value and output
+projections in the attention block together with the gate, up and down
+projections in the feed-forward block. Across the 28 decoder layers,
+this corresponds to 196 target Linear modules, with
+\texttt{lm\_head} excluded from quantization.
+
+Representative UltraChat \texttt{train\_sft} inputs were first passed
+through the BF16 model to collect activation statistics for the target
+Linear modules. Candidate channel-wise transformations were then
+constructed from two scale families: a SmoothQuant-style
+activation--weight formulation and an activation-driven formulation
+inspired by AWQ.
+
+A total of 20 candidate scaling configurations were evaluated under the
+intended W4A8 numerical path. Let
+
+\begin{equation}
+\mathcal{S}
+=
+\left\{
+s^{(1)},s^{(2)},\ldots,s^{(20)}
+\right\}
+\label{eq:w4a8-candidate-scales}
+\end{equation}
+denote the candidate scale set. For a candidate
+\(s\in\mathcal{S}\), the corresponding block output after the simulated
+W4A8 transformation is denoted
+\(\mathbf{Y}_{\mathrm{W4A8}}(s)\). The retained scale is selected by
+minimising the reconstruction error relative to the BF16 block output:
+
+\begin{equation}
+s^{*}
+=
+\arg\min_{s\in\mathcal{S}}
+\frac{1}{N}
+\sum_{n=1}^{N}
+\left\|
+\mathbf{Y}^{(n)}_{\mathrm{BF16}}
+-
+\mathbf{Y}^{(n)}_{\mathrm{W4A8}}(s)
+\right\|_2^2 .
+\label{eq:w4a8-scale-search}
+\end{equation}
+
+The final W4 checkpoint is executed using the ATen packed INT4
+weight path, while the dynamic A8 stage is implemented using a custom
+Triton kernel. The persistent weight representation therefore remains
+compressed during runtime inference.
 
 \subsection{NestQuant Pipeline}
 
