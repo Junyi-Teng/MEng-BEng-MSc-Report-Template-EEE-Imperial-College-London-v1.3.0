@@ -123,7 +123,7 @@ model-quality evaluation.
 
 The calibration procedure is different from the quantization pipelines. The retained AWQ, smooth quant and project-specific W4A8 configurations used 64 representative calibration conversations. NestQuant used the same UltraChat-based experimental framework with a 2,048-token context for its calibration procedure. For all pipelines, calibration data were kept separate from the \texttt{test\_sft} examples used for the final cross-method comparison. This separation prevents the evaluation data from contributing to the selection of quantization parameters and provides a consistent basis for comparing the low-precision configurations.
 
-\subsection{Common Evaluation Protocol}
+\subsection{Common Running Protocol}
 To provide a consistent basis for cross-method comparison, all principal
 model configurations were evaluated using the same held-out
 UltraChat-200k \texttt{test\_sft} split. The evaluation included the
@@ -142,16 +142,224 @@ tokens. A maximum sequence length of 256 tokens and a maximum scored
 assistant-response length of 64 tokens were used, with a batch size of
 one. Three examples were processed as warm-up before measurement and
 were excluded from the timed evaluation. Dataset loading and
-tokenization were also excluded from the measured execution region.
+tokenization were also excluded from the measured execution region. Table \ref{tab:common-evaluation-protocol} shows the database in detail.
+\begin{table}[htbp]
+\centering
+\caption{Common model-quality evaluation protocol.}
+\label{tab:common-evaluation-protocol}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.20}
+
+\begin{tabularx}{\textwidth}{
+@{}
+>{\raggedright\arraybackslash}p{0.38\textwidth}
+>{\raggedright\arraybackslash}X
+@{}
+}
+\toprule
+\textbf{Evaluation setting} &
+\textbf{Configuration} \\
+\midrule
+
+Dataset &
+UltraChat-200k \\
+
+Split &
+\texttt{test\_sft} \\
+
+Scoring target &
+Assistant-response tokens only \\
+
+Assistant responses &
+73,150 \\
+
+Scored assistant tokens &
+4,500,809 \\
+
+Maximum sequence length &
+256 tokens \\
+
+Maximum scored response length &
+64 tokens \\
+
+Batch size &
+1 \\
+
+Warm-up &
+3 examples, excluded from timing \\
+
+Timed region &
+Model execution only; data loading and tokenization excluded \\
+
+Primary quality outputs &
+Mean negative log-likelihood and perplexity \\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
 
 
 \section{Quantization Pipelines}
 
 
 \subsection{AWQ Pipeline}
+In AWQ retained configuration, the eligible Linear-layer weights are
+quantized using symmetric grouped INT4 with a group size of 128. For each weight group \(G_g\), symmetric INT4 quantization was applied
+using a group-specific scale: \begin{equation}
+s_g
+=
+\frac{\max_{w_i \in G_g}|w_i|}
+     {2^{b-1}-1},
+\qquad b=4,
+\label{eq:awq-group-scale}
+\end{equation}
+
+and with the integer representation:
+
+\begin{equation}
+q_i
+=
+\operatorname{clip}
+\left(
+\operatorname{round}
+\left(
+\frac{w_i}{s_g}
+\right),
+-8,7
+\right),
+\label{eq:awq-int4}
+\end{equation}
+
+so the reconstructed weight is
+
+\begin{equation}
+\hat{w}_i=s_g q_i.
+\label{eq:awq-dequant}
+\end{equation}
+Quantization is applied to the query, key, value and output projections
+of the attention block and the gate, up and down projections of the
+feed-forward block. Across the 28 decoder layers, this gives 196 target
+Linear modules. The \texttt{lm\_head} and other non-target tensors
+remain outside this quantization scope. Runtime activations and the key--value cache remain at higher
+precision, producing the W4A16KV16 operating point. This configuration
+therefore isolates the effect of low-bit weight representation without
+introducing activation or cache quantization. The whole process is shown in Figure \ref{fig:awq-process}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]
+    {imgs/awq-pipeline-visual.png}
+    \caption{AWQ implementation.}
+    \label{fig:awq-process}
+\end{figure}
+
+For the formal runtime path, the compressed weights are converted to
+the ATen packed INT4 representation before measured inference. All 196
+target Linear modules are replaced by the packed implementation and
+the decompression path associated with the source compressed
+checkpoint is removed. The packed representation is verified after
+model setup and inference so that checkpoint compression is not
+mistaken for a genuinely compressed runtime representation.
+
 
 \subsection{SmoothQuant Pipeline}
+Unlike weight-only quantization,
+SmoothQuant explicitly addresses activation outliers before integer
+quantization by redistributing part of the quantization difficulty from
+activations to the corresponding weight channels.
 
+For a Linear layer
+
+\begin{equation}
+\mathbf{Y}
+=
+\mathbf{W}\mathbf{X},
+\label{eq:sq-linear}
+\end{equation}
+
+a positive diagonal scaling matrix
+\(\mathbf{S}=\operatorname{diag}(s_1,\ldots,s_d)\) can be introduced
+without changing the original floating-point operation:
+
+\begin{equation}
+\mathbf{Y}
+=
+\mathbf{W}\mathbf{X}
+=
+\left(\mathbf{W}\mathbf{S}\right)
+\left(\mathbf{S}^{-1}\mathbf{X}\right).
+\label{eq:sq-equivalent-transform}
+\end{equation}
+
+The channel-wise smoothing coefficient is determined from the observed
+activation and weight ranges as
+
+\begin{equation}
+s_j
+=
+\frac{
+\left(\max |X_j|\right)^{\alpha}
+}{
+\left(\max |W_j|\right)^{1-\alpha}
+},
+\label{eq:sq-smoothing-factor}
+\end{equation}
+
+where \(j\) denotes an input channel and \(\alpha\) controls how much
+quantization difficulty is migrated from activations to weights. The
+retained implementation used
+
+\begin{equation}
+\alpha = 0.8.
+\end{equation}
+
+Representative UltraChat \texttt{train\_sft} inputs were used to
+collect the activation statistics required to determine the smoothing
+transformation. The transformation itself was applied before runtime
+inference, allowing the resulting activation distribution to be more
+suitable for low-precision representation.
+
+After smoothing, the target Linear-layer weights were represented using
+INT8, while their input activations were quantized dynamically to INT8
+on a per-token basis. For an activation vector \(\mathbf{x}\), the
+symmetric dynamic activation scale was calculated as
+
+\begin{equation}
+s_x
+=
+\frac{\max_i |x_i|}{127},
+\label{eq:sq-a8-scale}
+\end{equation}
+
+with the corresponding INT8 representation
+
+\begin{equation}
+q_i^{(x)}
+=
+\operatorname{clip}
+\left(
+\operatorname{round}
+\left(
+\frac{x_i}{s_x}
+\right),
+-127,127
+\right).
+\label{eq:sq-a8-quant}
+\end{equation}
+
+So the resulting operating point is denoted W8A8KV16: both the target
+weights and runtime activations use 8-bit representations, while the
+key--value cache remains at 16-bit precision. Here is the entire process of smooth quant in Figure \ref{smoothquant-pipeline-visual}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.96\textwidth]
+    {imgs/smoothquant-pipeline-visual.png}
+    \caption{SmoothQuant block diagram.}
+    \label{fig:smoothquant-pipeline-visual}
+\end{figure}
 
 \subsection{Project-Specific W4A8 Pipeline}
 
