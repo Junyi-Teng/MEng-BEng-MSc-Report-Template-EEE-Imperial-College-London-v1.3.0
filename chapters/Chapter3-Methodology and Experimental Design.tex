@@ -413,9 +413,415 @@ s^{*}
 The final W4 checkpoint is executed using the ATen packed INT4
 weight path, while the dynamic A8 stage is implemented using a custom
 Triton kernel. The persistent weight representation therefore remains
-compressed during runtime inference.
+compressed during runtime inference. The complete W4A8 workflow will be shown in figure \ref{fig:w4a8-pipeline-visual}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]
+    {imgs/w4a8-pipeline-visual.png}
+    \caption{Project-specific W4A8 workflow implementation }
+    \label{fig:w4a8-pipeline-visual}
+\end{figure}
 
 \subsection{NestQuant Pipeline}
+NestQuant was implemented as the principal structured low-bit
+quantization method in this study
+\cite{savkin2025nestquantnestedlatticequantization}. In contrast to
+AWQ, SmoothQuant and the project-specific W4A8 pipeline, which use
+scalar or grouped quantization, NestQuant represents groups of values
+using structured vector quantization. The method further allows the
+quantization scope to be extended from model weights to runtime
+activations and the key--value cache.
 
+The retained implementation uses an 8-dimensional \(E_8\) lattice,
+Hadamard rotation and quantization-aware LDLQ (QA-LDLQ). The project
+configuration uses
+
+\begin{equation}
+q = 14,
+\qquad
+k = 4,
+\label{eq:nestquant-qk}
+\end{equation}
+
+where \(q\) controls the discrete lattice-code representation and
+\(k\) denotes the number of candidate scaling coefficients available
+during vector quantization.
+
+Before lattice quantization, the relevant tensors are transformed using
+an orthogonal Hadamard rotation. The purpose of this transformation is
+to redistribute large-magnitude coordinates across dimensions and
+therefore reduce the effect of isolated outliers on low-bit
+quantization.
+
+Let \(\mathbf{R}\) denote an orthogonal rotation matrix satisfying
+
+\begin{equation}
+\mathbf{R}^{\mathrm{T}}\mathbf{R}
+=
+\mathbf{I}.
+\label{eq:nestquant-orthogonal}
+\end{equation}
+
+For a vector \(\mathbf{x}\), the rotated representation is
+
+\begin{equation}
+\widetilde{\mathbf{x}}
+=
+\mathbf{R}\mathbf{x}.
+\label{eq:nestquant-rotation}
+\end{equation}
+
+Because the transformation is orthogonal, Euclidean geometry is
+preserved while the coordinate distribution presented to the
+quantizer is changed. The transformed tensors are divided into 8-dimensional vectors
+
+\begin{equation}
+\mathbf{v}_j \in \mathbb{R}^{8},
+\label{eq:nestquant-vector-block}
+\end{equation}
+
+which are subsequently represented using the structured \(E_8\)
+lattice quantizer.
+For each 8-dimensional vector \(\mathbf{v}\), NestQuant evaluates the
+available scaling coefficients
+\(\{\beta_1,\ldots,\beta_k\}\). For scale \(\beta_p\), the candidate
+reconstruction is
+
+\begin{equation}
+\widehat{\mathbf{v}}_{p}
+=
+\beta_p
+\operatorname{Decode}
+\left[
+\operatorname{Encode}
+\left(
+\frac{\mathbf{v}}{\beta_p}
+\right)
+\right].
+\label{eq:nestquant-vector-reconstruction}
+\end{equation}
+
+The scaling coefficient is selected by minimising the vector
+reconstruction error,
+
+\begin{equation}
+p^{*}
+=
+\arg\min_{p\in\{1,\ldots,k\}}
+\left\|
+\mathbf{v}
+-
+\widehat{\mathbf{v}}_{p}
+\right\|_2^2 ,
+\label{eq:nestquant-beta-selection}
+\end{equation}
+
+giving the retained reconstruction
+
+\begin{equation}
+\widehat{\mathbf{v}}
+=
+\widehat{\mathbf{v}}_{p^{*}} .
+\label{eq:nestquant-vector-output}
+\end{equation}
+
+This differs from element-wise INT4 quantization because a complete
+8-dimensional vector is represented jointly using a structured lattice
+code and a selected scaling coefficient.
+
+NestQuant combines lattice quantization with second-order error
+feedback. For a weight matrix \(\mathbf{W}\) and original layer input
+\(\mathbf{X}\), conventional second-order weight quantization considers
+the effect of replacing \(\mathbf{W}\) by a quantized matrix
+\(\mathbf{U}\).
+
+When activations are also quantized, however, the layer receives
+\(\mathbf{X}+\mathbf{Z}\), where \(\mathbf{Z}\) denotes activation
+quantization error. The resulting output error is therefore
+
+\begin{equation}
+\boldsymbol{\delta}(\mathbf{U})
+=
+\mathbf{W}\mathbf{X}
+-
+\mathbf{U}
+\left(
+\mathbf{X}+\mathbf{Z}
+\right).
+\label{eq:nestquant-output-error}
+\end{equation}
+
+QA-LDLQ seeks the quantized weight matrix
+
+\begin{equation}
+\mathbf{U}^{*}
+=
+\arg\min_{\mathbf{U}\in\mathcal{C}_{Q}}
+\mathbb{E}
+\left[
+\left\|
+\boldsymbol{\delta}(\mathbf{U})
+\right\|_2^2
+\right],
+\label{eq:qa-ldlq-objective}
+\end{equation}
+
+where \(\mathcal{C}_{Q}\) denotes the set of permitted quantized
+representations.
+
+The second-order activation matrix is defined as
+
+\begin{equation}
+\mathbf{H}
+=
+\mathbb{E}
+\left[
+\mathbf{X}\mathbf{X}^{\mathrm{T}}
+\right],
+\label{eq:nestquant-hessian}
+\end{equation}
+
+while activation-quantization noise contributes
+
+\begin{equation}
+\mathbf{J}
+=
+\mathbb{E}
+\left[
+\mathbf{Z}\mathbf{Z}^{\mathrm{T}}
+\right].
+\label{eq:nestquant-noise}
+\end{equation}
+
+The QA-LDLQ transformation produces the modified weight target
+
+\begin{equation}
+\widetilde{\mathbf{W}}
+=
+\mathbf{W}\mathbf{H}
+\left(
+\mathbf{H}+\mathbf{J}
+\right)^{-1}.
+\label{eq:qa-ldlq-target}
+\end{equation}
+
+Standard LDLQ-style sequential error feedback is then applied to
+\(\widetilde{\mathbf{W}}\) using
+\(\mathbf{H}+\mathbf{J}\). This allows the weight-construction process
+to account explicitly for the additional numerical error introduced by
+low-bit activations.
+
+Four principal NestQuant configurations are evaluated, as summarized configurations form a controlled expansion of quantization scope.
+W4.25A16KV16 represents the weight-quantized NestQuant configuration.
+W4.25A16KV4 additionally reduces the precision of the key--value cache,
+whereas W4.25A4KV16 introduces low-bit activations while retaining the
+higher-precision cache. Finally, W4.25A4KV4 applies low precision across
+weights, activations and the key--value cache.
+
+The experimental structure can therefore be represented as
+
+\begin{equation}
+\mathrm{W4.25A16KV16}
+\begin{cases}
+\longrightarrow \mathrm{W4.25A16KV4}, & \text{KV ablation},\\[2mm]
+\longrightarrow \mathrm{W4.25A4KV16}, & \text{activation ablation},\\[2mm]
+\longrightarrow \mathrm{W4.25A4KV4},  & \text{combined scope}.
+\end{cases}
+\label{eq:nestquant-scope-tree}
+\end{equation}
+
+This design separates the effect of activation precision from that of
+the key--value cache instead of changing both simultaneously. The entire process is shown in Figure \ref{fig:nestquant-pipeline}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]{imgs/nestquant-pipeline.png}
+    \caption{Whole process of the NestQuant.}
+    \label{fig:nestquant-pipeline}
+\end{figure}
 
 \section{Evaluation Protocol and Metrics}
+The evaluation framework separates model quality from deployment
+efficiency. Model quality is assessed using negative log-likelihood and
+perplexity under the common UltraChat evaluation protocol described
+previously. Deployment efficiency is evaluated separately using model
+storage, peak GPU memory and runtime performance. This distinction is
+important because a lower numerical bit width does not necessarily
+produce a proportional improvement in memory usage or execution speed.
+
+
+\paragraph{Negative log-likelihood and perplexity.}
+
+Model quality is primarily evaluated using assistant-response
+perplexity. For \(N\) scored assistant tokens, the mean negative
+log-likelihood is
+
+\begin{equation}
+\mathrm{NLL}
+=
+-\frac{1}{N}
+\sum_{t=1}^{N}
+\log
+p
+\left(
+x_t \mid x_{<t}
+\right),
+\label{eq:evaluation-nll}
+\end{equation}
+
+where only assistant-response positions contribute to the summation.
+User messages and previous conversation turns are retained as context
+but are masked from the loss calculation.
+
+Perplexity is then obtained from
+
+\begin{equation}
+\mathrm{PPL}
+=
+\exp
+\left(
+\mathrm{NLL}
+\right).
+\label{eq:evaluation-ppl}
+\end{equation}
+
+A lower perplexity indicates better preservation of the predictive
+behaviour of the reference model under the same evaluation stream.
+
+
+\paragraph{Relative quality degradation.}
+
+To compare quantized configurations with their corresponding reference,
+the relative increase in perplexity is calculated as
+
+\begin{equation}
+\Delta_{\mathrm{PPL}}(\%)
+=
+100
+\left(
+\frac{\mathrm{PPL}_{q}}
+     {\mathrm{PPL}_{r}}
+-1
+\right),
+\label{eq:relative-ppl-increase}
+\end{equation}
+
+where \(\mathrm{PPL}_{q}\) denotes the perplexity of the quantized model
+and \(\mathrm{PPL}_{r}\) denotes the selected reference.
+
+The BF16 model is used as the reference for the principal cross-method
+comparison. For the NestQuant scope ablation,
+W4.25A16KV16 is used as the internal reference so that the incremental
+effects of activation and KV-cache quantization can be evaluated
+independently.
+
+
+\paragraph{Runtime model storage.}
+
+Model-tensor storage is measured from the tensor representation retained
+by the executable model. Shared or aliased storage is counted only once
+to avoid double counting. The percentage reduction relative to a
+reference configuration is
+
+\begin{equation}
+R_{\mathrm{storage}}(\%)
+=
+100
+\left(
+1-
+\frac{S_q}{S_r}
+\right),
+\label{eq:storage-reduction}
+\end{equation}
+
+where \(S_q\) and \(S_r\) denote the runtime model-tensor storage of the
+quantized and reference configurations, respectively.
+
+Serialized checkpoint size is treated separately from runtime
+model-tensor storage because the on-disk representation may contain
+packing metadata, scales and other auxiliary information.
+
+
+\paragraph{Effective physical bit rate.}
+
+For a packed representation containing \(N_w\) target weights and
+occupying \(S\) bytes, the effective physical bit rate is defined as
+
+\begin{equation}
+b_{\mathrm{eff}}
+=
+\frac{8S}{N_w}.
+\label{eq:effective-bit-rate}
+\end{equation}
+
+This metric describes the actual physical storage requirement of the
+selected packed representation and therefore includes the relevant
+side information rather than only the nominal quantization code width.
+This distinction is particularly important for the W4.25 NestQuant
+representation.
+
+
+\paragraph{GPU-memory measurement.}
+
+GPU-memory behaviour is evaluated using CUDA allocated-memory
+statistics. Memory counters are reset after model construction and
+runtime setup so that one-off checkpoint loading and representation
+conversion do not determine the reported inference peak.
+
+Peak allocated GPU memory is recorded during the measured execution
+region. The relative reduction is calculated as
+
+\begin{equation}
+R_{\mathrm{GPU}}(\%)
+=
+100
+\left(
+1-
+\frac{M_q}{M_r}
+\right),
+\label{eq:gpu-memory-reduction}
+\end{equation}
+
+where \(M_q\) and \(M_r\) are the peak allocated GPU-memory values of
+the quantized and reference implementations, respectively.
+
+The reported memory therefore characterizes the executable runtime
+representation rather than temporary memory required during model
+loading or conversion.
+
+
+\paragraph{Runtime performance.}
+
+Runtime performance is evaluated independently from perplexity and
+memory. Throughput is defined as
+
+\begin{equation}
+\mathrm{Throughput}
+=
+\frac{N_{\mathrm{processed}}}
+     {T_{\mathrm{eval}}},
+\label{eq:evaluation-throughput}
+\end{equation}
+
+where \(N_{\mathrm{processed}}\) is the number of processed tokens and
+\(T_{\mathrm{eval}}\) is the corresponding measured execution time.
+
+For paired runtime measurements, speedup relative to the matched
+reference is calculated as
+
+\begin{equation}
+\mathrm{Speedup}
+=
+\frac{T_{\mathrm{reference}}}
+     {T_{\mathrm{quantized}}}.
+\label{eq:evaluation-speedup}
+\end{equation}
+
+If the value is greater than one indicates that the quantized implementation is
+faster than its reference.
+
+Eager execution and CUDA Graph execution are considered separately
+because graph replay can reduce Python and kernel-launch overhead.
+Consequently, runtime performance is interpreted as a property of the
+combination of quantization representation and execution backend rather
+than of nominal bit width alone.
