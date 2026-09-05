@@ -2,17 +2,23 @@
 % Example text
 % Write your abstract here
 
-The abstract is a very brief summary of the dissertation's contents. It should be about half a page long. 
-
 \begin{itemize}
-\item Audience: technical or academic peers.
-\item Content: concise summary of the problem, methodology, results, and conclusions.
-\item Language: uses discipline-specific terminology and assumes the reader has technical background knowledge.
-\item Purpose: to give experts a quick overview of the work so they can decide whether to read the full document.
-\end{itemize}
+The deployment of large language models is increasingly constrained by
+their high memory and computational requirements, while aggressive
+low-bit quantization can introduce substantial degradation in model
+quality.  For these issues, this dissertation presents a comparative
+post-training quantization study of Llama-3.2-3B-Instruct using AWQ,
+SmoothQuant, a project-specific W4A8 pipeline and NestQuant. All
+principal configurations are evaluated under a common UltraChat-200k
+protocol, while additional NestQuant ablation and packed-deployment
+experiments are performed to examine the effects of activation and
+KV-cache quantization. The results show that SmoothQuant achieves the
+best quality retention, while packed W4 configurations reduce the most peak GPU memory. NestQuant further demonstrates that activation
+quantization is more quality-sensitive than KV-cache quantization. Overall, the results demonstrate
+that practical low-bit LLM quantization requires a joint consideration
+of model quality, memory reduction, quantization scope and deployability.
 
-\textbf{Example of Abstract}\\
-We propose a novel convex optimization framework for parameter identification in nonlinear dynamical systems using sparse measurements. The approach leverages structured regularization and is validated on a benchmark biochemical reaction model, showing improved accuracy and robustness compared to existing methods.
+\end{itemize}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -27,18 +33,24 @@ We propose a novel convex optimization framework for parameter identification in
 % EDIT FROM HERE
 % Example text
 
-Also this should be about half a page long.
-
 \begin{itemize}
-\item Audience: non-experts, such as policymakers, journalists, or the general public.
-\item Content: explains why the research matters, what was done, and what the implications and impact are, without technical jargon.
-\item Language: clear, simple, and accessible; often includes metaphors or examples to aid understanding. Do not use acronyms.
-\item Purpose: to communicate the significance and relevance of the work to a broad audience.
+Large language models can require large amounts of computer memory,
+making them expensive and difficult to run on hardware with limited
+resources. This project compared several methods for reducing the
+numerical precision of a large language model in order to lower memory
+requirements while preserving model performance. The study examined how
+different approaches affected model quality, storage size and graphics
+processor memory usage.
+
+The results showed that no single method was best in every respect.
+Some methods preserved model quality better, while others achieved
+greater memory savings. The study also found that reducing the precision
+of model activations had a stronger effect on performance than reducing
+the precision of stored attention information. Overall, the work shows
+that efficient deployment of large language models requires balancing
+model quality, memory savings and practical hardware requirements.
 \end{itemize}
 
-
-\textbf{Example of Plain Language Summary (for the same project in the abstract! Can you see how different this is?)}\\
-Understanding how complex systems like biological reactions behave is important in medicine and engineering. We developed a new mathematical technique that can help uncover how these systems work, even if we only have limited data. This could help researchers make better predictions and design more effective treatments.
 
 
 

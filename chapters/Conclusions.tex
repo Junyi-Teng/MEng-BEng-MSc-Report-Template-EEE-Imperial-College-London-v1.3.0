@@ -5,6 +5,28 @@
 
 
 
-All good projects conclude with an objective evaluation of the project's successes and failures and suggestions for future work which can take the project further. It is important to understand that there is no such thing as a perfect project. 
+This dissertation investigated low-bit post-training quantization of
+Llama-3.2-3B-Instruct using AWQ, SmoothQuant, a project-specific W4A8
+pipeline and NestQuant. The study focused on the trade-off between model
+quality, memory reduction and practical deployment.
 
-Even the very best pieces of work have their limitations and you are expected to provide a proper critical appraisal of what you have done. Your assessors are bound to spot the limitations of your work and you are expected to be able to do the same.
+The results showed that no single method performed best across all
+objectives. SmoothQuant achieved the strongest quality retention, with
+only a 0.48\% perplexity increase relative to BF16, while NestQuant
+W4.25A16KV16 followed closely at 0.64\%. AWQ and W4A8 produced larger
+quality degradation but achieved the strongest memory savings, reducing
+runtime model storage from 5.98~GiB to 2.13~GiB and peak GPU memory from
+6.33~GiB to 2.47~GiB.
+
+The NestQuant ablation showed that activation quantization was more
+quality-sensitive than KV-cache quantization. A4 increased perplexity by
+2.941\%, compared with only 0.743\% for KV4. The packed NestQuant
+W4.25A16KV16 implementation also reduced checkpoint size from 5.78~GiB
+to 2.16~GiB and peak GPU memory from 6.01~GiB to 2.84~GiB.
+
+Overall, the results demonstrate that low-bit quantization should be
+evaluated using model quality, quantization scope, memory reduction and
+deployment practicality rather than bit width alone. SmoothQuant provided
+the best quality retention, packed W4 configurations delivered the
+largest memory savings, and NestQuant provided the broadest quantization
+scope across weights, activations and the KV cache.
