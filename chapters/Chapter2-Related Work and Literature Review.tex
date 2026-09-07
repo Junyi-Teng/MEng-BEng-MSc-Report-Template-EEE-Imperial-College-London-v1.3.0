@@ -27,8 +27,7 @@ lower-precision representation without repeating the original
 end-to-end training process. This distinguishes it from
 quantization-aware training, in which simulated quantization effects are
 introduced during optimisation so that the model parameters can adapt to
-the resulting numerical error
-\cite{jacob2017quantizationtrainingneuralnetworks,zhu2024survey}.
+the resulting numerical error.
 For large pretrained language models, avoiding full retraining makes
 \ac{PTQ} attractive when the original training data or computational
 budget are unavailable.
@@ -41,8 +40,7 @@ reconstruction targets. Calibration should therefore be regarded as part
 of the quantizer construction rather than as final model evaluation.
 The importance of calibration also means that results from different
 published methods cannot be assumed to be directly comparable when they
-use different calibration data, sample counts or numerical settings
-\cite{williams2024calibration}.
+use different calibration data, sample counts or numerical settings.
 
 
 \subsection{Quantization Granularity}
@@ -64,8 +62,7 @@ q_{\min},q_{\max}
 where \(s\) is the scale and \(\hat{x}\) is the reconstructed value.
 Reducing the available bit width decreases the number of reconstruction
 levels and therefore increases the difficulty of approximating the
-original tensor accurately
-\cite{jacob2017quantizationtrainingneuralnetworks}.
+original tensor accurately.
 
 Quantization methods also differ in the granularity over which their
 parameters are shared. Per-tensor quantization uses one scale for an
@@ -76,8 +73,7 @@ Finer granularity can better adapt to local variations in numerical
 range, but requires additional metadata and may complicate the runtime
 implementation. ZeroQuant, for example, combines fine-grained weight
 quantization with token-wise activation quantization to improve the
-accuracy of low-precision Transformer inference
-\cite{yao2022zeroquantefficientaffordableposttraining}.
+accuracy of low-precision Transformer inference.
 
 \subsection{Scalar and Vector Representations}
 Scalar quantization treats individual values independently, even when a
@@ -157,8 +153,7 @@ method developed for low-bit LLM inference. Its central observation is
 that weight values are not equally important to model behaviour.
 Experiments reported in the original work showed that protecting a
 small fraction of salient weight channels can substantially reduce the
-quality degradation caused by aggressive low-bit quantization
-\cite{lin2026awqactivationawareweightquantization}.
+quality degradation caused by aggressive low-bit quantization.
 
 AWQ determines salience using the distribution of the input
 activations rather than the magnitude of the weights alone. Weight
@@ -244,8 +239,7 @@ salient and non-salient channels. An overly aggressive scale can reduce
 the relative error of important channels while increasing the
 quantization range and error experienced by other weights. AWQ
 therefore performs a small grid search over \(\alpha\) and additionally
-applies weight clipping to reduce quantization error
-\cite{lin2026awqactivationawareweightquantization}.
+applies weight clipping to reduce quantization error.
 
 Unlike GPTQ, AWQ does not sequentially reconstruct the weights using an
 inverse Hessian and does not require backpropagation. The calibration
@@ -253,7 +247,7 @@ data are used primarily to estimate simple per-channel activation
 statistics and to evaluate candidate scaling factors. The authors argue
 that this reduced dependence on direct layer reconstruction limits
 overfitting to the calibration samples and improves transfer across
-tasks, domains and modalities \cite{lin2026awqactivationawareweightquantization}. This represents an
+tasks, domains and modalities. This represents an
 important methodological contrast with second-order
 reconstruction-based quantization.
 
@@ -280,8 +274,7 @@ activation-salience-aware.
 Each approach also introduces distinct limitations. GPTQ performs
 layer-wise reconstruction using calibration activations, which can make
 its behaviour sensitive to the calibration distribution; AWQ reports
-that reconstruction-based methods may overfit the calibration set
-\cite{lin2026awqactivationawareweightquantization}. More recent work has
+that reconstruction-based methods may overfit the calibration set. More recent work has
 also identified error accumulation across independently calibrated
 layers as a limitation of conventional GPTQ-style calibration and
 proposed asymmetric calibration to compensate for this effect. AWQ avoids second-order reconstruction and
@@ -289,8 +282,7 @@ backpropagation, but remains fundamentally a weight-only method.
 Consequently, activations and the KV cache remain at higher precision.
 Moreover, practical W4A16 acceleration depends on efficient weight
 packing, dequantization and specialised kernel support rather than on
-the reduced weight bit width alone
-\cite{lin2026awqactivationawareweightquantization}.
+the reduced weight bit width alone.
 
 These limitations reinforce a broader point relevant to this
 dissertation: a nominal W4 configuration does not uniquely determine
@@ -310,10 +302,7 @@ quantization is more difficult because activation values depend on the
 current input and may contain persistent large-magnitude outliers.
 Methods such as ZeroQuant and SmoothQuant therefore introduce
 fine-grained quantization, distribution transformation and specialised
-runtime support to enable practical W8A8 inference
-\cite{yao2022zeroquantefficientaffordableposttraining,
-xiao2023smoothquant}. The following subsections review the activation
-outlier problem, SmoothQuant, the W4A8 operating regime and the
+runtime support to enable practical W8A8 inference. The following subsections review the activation outlier problem, SmoothQuant, the W4A8 operating regime and the
 limitations of joint weight--activation quantization.
 
 \subsection{Activation outliers}
@@ -357,13 +346,11 @@ distinct high-precision activations may consequently be mapped to the
 same or neighbouring integer codes. Activation outliers can therefore
 increase quantization error across an entire tensor or quantization
 group even when the outlying values themselves constitute only a small
-fraction of the activations
-\cite{xiao2023icml-smoothquant}.
+fraction of the activations.
 
 \subsection{SmoothQuant}
 SmoothQuant is a training-free W8A8 \ac{PTQ} method that addresses
-activation outliers through an equivalent channel-wise transformation
-\cite{xiao2023icml-smoothquant}. Its central observation is that weights
+activation outliers through an equivalent channel-wise transformation. Its central observation is that weights
 are generally easier to quantize than activations. Quantization
 difficulty can therefore be redistributed: activation channels are
 scaled down while the corresponding weight channels are scaled up so
@@ -384,8 +371,7 @@ be folded into neighbouring model operations before inference. The
 resulting model can then use a comparatively regular INT8 path. The
 original work demonstrates that this approach can retain model quality
 while reducing memory and improving inference efficiency across several
-large language-model families
-\cite{xiao2023icml-smoothquant}. In this dissertation, SmoothQuant
+large language-model families. In this dissertation, SmoothQuant
 therefore serves as the principal W8A8 reference. The exact smoothing
 coefficient, activation granularity and execution backend used in the
 project are intentionally deferred to Chapter~\ref{ch3}.
@@ -451,8 +437,7 @@ between inputs, so calibration statistics cannot completely represent
 every activation pattern encountered during deployment. SmoothQuant
 addresses this problem by redistributing quantization difficulty from
 activations to weights through channel-wise scaling, whereas
-LLM.int8() retains selected outlier dimensions at higher precision
-\cite{xiao2023icml-smoothquant}.
+LLM.int8() retains selected outlier dimensions at higher precision.
 
 However, these approaches introduce different compromises:
 SmoothQuant remains dependent on representative calibration statistics
@@ -461,8 +446,7 @@ outlier path of LLM.int8() can introduce additional runtime overhead.
 The SmoothQuant study itself shows that an unsuitable migration strength
 can shift excessive quantization difficulty towards either activations
 or weights, demonstrating that the two operands cannot be optimised
-independently
-\cite{xiao2023icml-smoothquant}.
+independently.
 
 \section{Structured Vector and Lattice Quantization}
 Scalar and group-wise quantizers allocate reconstruction values
@@ -512,8 +496,7 @@ scalar quantization because bit patterns can be allocated according to a
 multidimensional reconstruction region rather than a Cartesian grid.
 The original NestQuant study argues that this becomes increasingly
 important when the quantized vectors are approximately Gaussian after
-normalisation and rotation
-\cite{savkin2025nestquantnestedlatticequantization}.
+normalisation and rotation.
 
 A second distinguishing feature is quantization-aware LDLQ
 (\mbox{QA-LDLQ}). Conventional reconstruction weight quantization
@@ -521,8 +504,7 @@ optimises the weights using statistics of the original activations.
 When the activations themselves are also quantized, their quantization
 noise changes the effective input seen by the quantized weight matrix.
 QA-LDLQ modifies the weight-construction objective so that activation
-quantization error is included during the reconstruction procedure
-\cite{savkin2025nestquantnestedlatticequantization}. This makes NestQuant
+quantization error is included during the reconstruction procedure. This makes NestQuant
 particularly relevant to the broader W/A/KV quantization scope examined
 in this dissertation.
 
@@ -567,8 +549,7 @@ separate quantization target with different requirements from static
 weight compression.
 
 NestQuant provides another route by applying its vector quantizer to
-keys and values in addition to weights and activations
-\cite{savkin2025nestquantnestedlatticequantization}. This broader scope is
+keys and values in addition to weights and activations. This broader scope is
 particularly useful for the present study because KV4 can be introduced
 independently of A4. The resulting comparison allows the effect of
 cache precision on model quality to be separated from the effect of
