@@ -27,7 +27,7 @@ lower-precision representation without repeating the original
 end-to-end training process. This distinguishes it from
 quantization-aware training, in which simulated quantization effects are
 introduced during optimisation so that the model parameters can adapt to
-the resulting numerical error.
+the resulting numerical error.\cite{jacob2017quantizationtrainingneuralnetworks}
 For large pretrained language models, avoiding full retraining makes
 \ac{PTQ} attractive when the original training data or computational
 budget are unavailable.
@@ -40,7 +40,7 @@ reconstruction targets. Calibration should therefore be regarded as part
 of the quantizer construction rather than as final model evaluation.
 The importance of calibration also means that results from different
 published methods cannot be assumed to be directly comparable when they
-use different calibration data, sample counts or numerical settings.
+use different calibration data, sample counts or numerical settings\cite{williams-aletras-2024-impact}.
 
 
 \subsection{Quantization Granularity}
@@ -73,7 +73,7 @@ Finer granularity can better adapt to local variations in numerical
 range, but requires additional metadata and may complicate the runtime
 implementation. ZeroQuant, for example, combines fine-grained weight
 quantization with token-wise activation quantization to improve the
-accuracy of low-precision Transformer inference.
+accuracy of low-precision Transformer inference\cite{yao2022zeroquantefficientaffordableposttraining}.
 
 \subsection{Scalar and Vector Representations}
 Scalar quantization treats individual values independently, even when a
@@ -96,11 +96,8 @@ Q_{\mathrm{V}}(\mathbf{x})
 The joint representation allows the codebook to exploit the geometry of
 a block rather than allocating reconstruction levels independently to
 each coordinate. Classical vector quantization therefore provides a
-different rate--distortion trade-off from scalar rounding
-\cite{1094577}. This distinction becomes important later in the chapter:
-GPTQ, AWQ and SmoothQuant primarily operate with scalar or group-wise
-representations, whereas QuIP\# and NestQuant introduce structured vector
-codebooks.
+different rate--distortion trade-off from scalar rounding. This distinction becomes important later in the chapter: GPTQ, AWQ and SmoothQuant primarily operate with scalar or group-wise representations, whereas QuIP\# and NestQuant introduce structured vector
+codebooks\cite{1094577}.
 
 
 \section{Weight-Only Post-Training Quantization}
@@ -115,7 +112,7 @@ is more important to the computation than the remainder.
 
 \subsection{\ac{GPTQ}}
 GPTQ is a reconstruction-aware weight-only \ac{PTQ} method designed for
-large Transformer models.
+large Transformer models\cite{frantar2023gptqaccurateposttrainingquantization}.
 
 For a weight matrix \(\mathbf{W}\), calibration activations
 \(\mathbf{X}\), and a set of admissible low-precision matrices
@@ -159,7 +156,7 @@ AWQ determines salience using the distribution of the input
 activations rather than the magnitude of the weights alone. Weight
 channels receiving consistently large-magnitude activation features
 have a greater influence on the corresponding linear-layer output and
-are therefore treated as more sensitive to quantization. This is why
+are therefore treated as more sensitive to quantization\cite{lin2026awqactivationawareweightquantization}. This is why
 the method is described as \emph{activation-aware}, despite quantizing
 only model weights.
 
@@ -277,7 +274,7 @@ its behaviour sensitive to the calibration distribution; AWQ reports
 that reconstruction-based methods may overfit the calibration set. More recent work has
 also identified error accumulation across independently calibrated
 layers as a limitation of conventional GPTQ-style calibration and
-proposed asymmetric calibration to compensate for this effect. AWQ avoids second-order reconstruction and
+proposed asymmetric calibration to compensate for this effect\cite{li2025gptaqefficientfinetuningfreequantization}. AWQ avoids second-order reconstruction and
 backpropagation, but remains fundamentally a weight-only method.
 Consequently, activations and the KV cache remain at higher precision.
 Moreover, practical W4A16 acceleration depends on efficient weight
@@ -288,7 +285,7 @@ These limitations reinforce a broader point relevant to this
 dissertation: a nominal W4 configuration does not uniquely determine
 model quality or deployment behaviour. Quantizer design, calibration,
 granularity, packing format, quantization scope and execution backend
-must be considered together when comparing low-bit implementations.
+must be considered together when comparing low-bit implementations\cite{park2024lutgemmquantizedmatrixmultiplication}.
 
 \section{Weight--Activation Post-Training Quantization}
 
@@ -316,7 +313,7 @@ activation scales either to be estimated from representative calibration
 data or to be calculated dynamically at runtime.
 
 A particularly important difficulty is the presence of
-large-magnitude activation outliers. Consider a signed symmetric
+large-magnitude activation outliers\cite{dettmers2022llmint88bitmatrixmultiplication}. Consider a signed symmetric
 \(b\)-bit quantizer applied to an activation group
 \(\mathcal{G}\). Its scale may be defined as
 
@@ -337,7 +334,7 @@ Equation~\eqref{eq:activation-outlier-scale}, the largest-magnitude
 value within the selected group determines the spacing between adjacent
 reconstruction levels. If only a small number of activation values are
 substantially larger than the remainder of the distribution, the scale
-must nevertheless be sufficiently large to represent them.
+must nevertheless be sufficiently large to represent them\cite{wei-etal-2023-outlier}.
 
 This enlarged scale reduces the effective resolution available to the
 majority of non-outlier values. Values concentrated near zero occupy
@@ -346,7 +343,7 @@ distinct high-precision activations may consequently be mapped to the
 same or neighbouring integer codes. Activation outliers can therefore
 increase quantization error across an entire tensor or quantization
 group even when the outlying values themselves constitute only a small
-fraction of the activations.
+fraction of the activations\cite{wei-etal-2023-outlier}.
 
 \subsection{SmoothQuant}
 SmoothQuant is a training-free W8A8 \ac{PTQ} method that addresses
@@ -364,7 +361,7 @@ difficulty is transferred, activation outliers remain problematic; if
 too much is transferred, the transformed weights themselves become
 harder to quantize. SmoothQuant therefore treats weight and activation
 quantization as a coupled problem rather than two independent
-rounding operations.
+rounding operations\cite{xiao2023icml-smoothquant}.
 
 An important systems advantage is that the smoothing transformation can
 be folded into neighbouring model operations before inference. The
@@ -389,7 +386,7 @@ activation outliers must still be controlled during runtime.
 FPTQ directly investigates post-training W4A8 quantization for large
 language models. It combines fine-grained weight quantization with
 layer-dependent activation strategies, including logarithmic
-equalisation for layers that are particularly difficult to quantize. This work demonstrates that W4A8 generally requires
+equalisation for layers that are particularly difficult to quantize\cite{li2023fptqfinegrainedposttrainingquantization}. This work demonstrates that W4A8 generally requires
 more specialised treatment than simply replacing the W8 weights of a
 W8A8 model with a conventional 4-bit quantizer.
 
@@ -398,9 +395,9 @@ numerical representations. ZeroQuant-FP investigates FP4 weights and
 FP8 activations, together with constrained weight scaling and
 low-rank compensation, to reduce the degradation introduced by W4A8
 quantization LQER instead combines activation-induced
-scaling with a low-rank approximation of the quantization error,
+scaling with a low-rank approximation of the quantization error\cite{wu2023zeroquantfpleapforwardllms},
 allowing part of the error discarded by the 4-bit weight representation
-to be reconstructed through an additional low-rank path.
+to be reconstructed through an additional low-rank path\cite{pmlr-v235-zhang24j}.
 
 These methods illustrate that the main challenge of W4A8 is not the
 notation itself, but the coordination of weight quantization,
@@ -431,13 +428,13 @@ described in Chapter~\ref{ch3} rather than in the present literature review.
 \subsection{Limitations of Joint Weight--Activation Quantization}
 Joint weight--activation quantization introduces approximation error
 into both the fixed model weights and the input-dependent activations,
-making it inherently more challenging than weight-only quantization.
+making it inherently more challenging than weight-only quantization\cite{shao2024omniquantomnidirectionallycalibratedquantization}.
 Activation distributions can contain persistent outliers and vary
 between inputs, so calibration statistics cannot completely represent
 every activation pattern encountered during deployment. SmoothQuant
 addresses this problem by redistributing quantization difficulty from
 activations to weights through channel-wise scaling, whereas
-LLM.int8() retains selected outlier dimensions at higher precision.
+LLM.int8() retains selected outlier dimensions at higher precision\cite{ashkboos2024quarotoutlierfree4bitinference}.
 
 However, these approaches introduce different compromises:
 SmoothQuant remains dependent on representative calibration statistics
@@ -446,7 +443,7 @@ outlier path of LLM.int8() can introduce additional runtime overhead.
 The SmoothQuant study itself shows that an unsuitable migration strength
 can shift excessive quantization difficulty towards either activations
 or weights, demonstrating that the two operands cannot be optimised
-independently.
+independently\cite{liu2025spinquantllmquantizationlearned}.
 
 \section{Structured Vector and Lattice Quantization}
 Scalar and group-wise quantizers allocate reconstruction values
@@ -461,12 +458,12 @@ A lattice is a regular discrete set of points in a Euclidean vector
 space. When used for quantization, the input is mapped to a nearby
 lattice point and represented through the associated code. Structured
 lattices can provide regular encoding and decoding procedures while
-retaining the geometric benefits of vector quantization.
+retaining the geometric benefits of vector quantization\cite{chee2024quip2bitquantizationlarge}.
 
 QuIP is an important example of this direction. It combines Hadamard
 incoherence processing with lattice-based vector codebooks, including a
 codebook derived from the eight-dimensional \(E_8\) lattice, to improve
-very-low-bit weight quantization. This work demonstrates that structured vector
+very-low-bit weight quantization\cite{tseng2024quipbetterllmquantization}. This work demonstrates that structured vector
 representations can outperform conventional scalar rounding in
 weight-only compression. However, vector quantization also introduces
 additional encoding and decoding complexity, which becomes especially
@@ -476,7 +473,7 @@ dynamically at runtime.
 Recent information-theoretic work provides further motivation for
 vector-codebook approaches. Under a Gaussian weight model, universal
 codebooks can theoretically operate within a small rate gap of
-codebooks adapted to the second-order statistics of the activations. The result is non-constructive and does
+codebooks adapted to the second-order statistics of the activations\cite{egiazarian2024extremecompressionlargelanguage}. The result is non-constructive and does
 not itself provide an efficient deployment algorithm, but it reinforces
 the idea that low-bit representation can be analysed as a
 rate--distortion problem rather than only as scalar rounding.
@@ -489,7 +486,7 @@ construction described in the original work uses the eight-dimensional
 Gosset lattice \(E_8\), low-dimensional vector blocks, normalisation and
 Hadamard rotation. Instead of using a single unrestricted codebook,
 nested lattice structure provides a finite collection of efficiently
-encodable reconstruction points.
+encodable reconstruction points\cite{savkin2025nestquantnestedlatticequantization}.
 
 The use of vector blocks provides a shaping advantage over independent
 scalar quantization because bit patterns can be allocated according to a
@@ -536,7 +533,7 @@ quality result as evidence of an unmeasured runtime memory saving.
 Chapter~\ref{ch1} introduced the KV cache as a distinct component of
 autoregressive inference memory. The literature on KV-cache quantization
 therefore focuses on reducing the precision of the stored key and value
-states while limiting disruption to the attention computation.
+states while limiting disruption to the attention computation\cite{pmlr-v235-liu24bz}.
 
 KIVI demonstrates that keys and values can exhibit different numerical
 properties and therefore need not use the same quantization granularity.
@@ -544,7 +541,7 @@ It applies per-channel quantization to keys and per-token quantization to
 values, enabling tuning-free low-bit cache storage. KVQuant similarly studies dedicated cache
 quantization for long-context inference, including pre-RoPE key
 quantization, non-uniform numerical representations and explicit
-treatment of outliers. These approaches show that the KV cache is a
+treatment of outliers\cite{hooper2025kvquant10millioncontext}. These approaches show that the KV cache is a
 separate quantization target with different requirements from static
 weight compression.
 
@@ -557,7 +554,7 @@ activation precision.
 
 The literature nevertheless highlights an important boundary: a
 lower-precision cache can only produce physical memory savings when the
-cache is actually stored and processed in that compact representation.
+cache is actually stored and processed in that compact representation\cite{yue2024wkvquantquantizingweightkeyvalue}.
 The present dissertation therefore treats the NestQuant KV4 experiment
 as a model-quality sensitivity study and does not claim packed KV4
 runtime savings that were not directly measured.

@@ -22,7 +22,7 @@ weights, runtime activations and the key--value cache.
 
 \section{Model and Experimental Context}
 \subsection{Base Model and Quantization Scope}
-All experiments use Llama-3.2-3B-Instruct as the common source model. The architecture contains 28 Transformer decoder layers and 3072 hiddendimensions , an intermediate feed-forward dimension of 8,192,24 attention heads and eight key--value heads, with a head dimension of 128. The source model is represented using BF16 parameters and provides the full-precision reference for the principal cross-method quality and memory comparisons.
+All experiments use Llama-3.2-3B-Instruct as the common source model. The architecture contains 28 Transformer decoder layers and 3072 hiddendimensions , an intermediate feed-forward dimension of 8,192,24 attention heads and eight key--value heads, with a head dimension of 128\cite{meta2024llama32}. The source model is represented using BF16 parameters and provides the full-precision reference for the principal cross-method quality and memory comparisons.
 
 The common weight-quantization scope is defined at the Linear-projection level. Each decoder layer contains 7 target Linear modules: the query, key, value and output projections in the self-attention block, together with the gate, up and down projections in the feed-forward network. So the total number of target modules is 
 \begin{equation}
@@ -117,7 +117,7 @@ Retained outside the common Linear-layer scope. \\
 UltraChat-200k was used as the data source for the calibration and
 evaluation procedures in this project. The dataset contains
 instruction-following conversations consisting of user and assistant
-turns. Calibration samples were drawn from the \texttt{train\_sft}
+turns\cite{ding2023enhancingchatlanguagemodels}. Calibration samples were drawn from the \texttt{train\_sft}
 split, while the \texttt{test\_sft} split was reserved for the common
 model-quality evaluation.
 
