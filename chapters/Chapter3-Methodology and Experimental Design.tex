@@ -24,6 +24,59 @@ weights, runtime activations and the key--value cache.
 \subsection{Base Model and Quantization Scope}
 All experiments use Llama-3.2-3B-Instruct as the common source model. The architecture contains 28 Transformer decoder layers and 3072 hiddendimensions , an intermediate feed-forward dimension of 8,192,24 attention heads and eight key--value heads, with a head dimension of 128\cite{meta2024llama32}. The source model is represented using BF16 parameters and provides the full-precision reference for the principal cross-method quality and memory comparisons.
 
+Table~\ref{tab:experimental-environment} summarises the principal
+software, hardware and calibration settings required to reproduce the
+experiments.
+
+\begin{table}[htbp]
+\centering
+\caption{Experimental environment and reproducibility settings.}
+\label{tab:experimental-environment}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.20}
+
+\begin{tabularx}{\textwidth}{@{}
+>{\raggedright\arraybackslash}p{0.34\textwidth}
+>{\raggedright\arraybackslash}X
+@{}}
+\toprule
+\textbf{Setting} & \textbf{Configuration} \\
+\midrule
+
+Source model &
+Llama-3.2-3B-Instruct \\
+
+Source precision &
+BF16 \\
+
+GPU &
+\texttt{NVIDIA GeForce RTX 5090} \\
+
+CUDA version &
+\texttt{12.8} \\
+
+PyTorch version &
+\texttt{2.11.0} \\
+
+Transformers version &
+\texttt{5.10.1} \\
+
+Common evaluation sequence length &
+Maximum 256 tokens \\
+
+Batch size &
+1 \\
+
+Warm-up &
+3 examples excluded from measurement \\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
 The common weight-quantization scope is defined at the Linear-projection level. Each decoder layer contains 7 target Linear modules: the query, key, value and output projections in the self-attention block, together with the gate, up and down projections in the feed-forward network. So the total number of target modules is 
 \begin{equation}
 N_{\mathrm{Linear}}
@@ -833,40 +886,3 @@ the quantized and reference implementations, respectively.
 The reported memory therefore characterizes the executable runtime
 representation rather than temporary memory required during model
 loading or conversion.
-
-
-\paragraph{Runtime performance.}
-
-Runtime performance is evaluated independently from perplexity and
-memory. Throughput is defined as
-
-\begin{equation}
-\mathrm{Throughput}
-=
-\frac{N_{\mathrm{processed}}}
-     {T_{\mathrm{eval}}},
-\label{eq:evaluation-throughput}
-\end{equation}
-
-where \(N_{\mathrm{processed}}\) is the number of processed tokens and
-\(T_{\mathrm{eval}}\) is the corresponding measured execution time.
-
-For paired runtime measurements, speedup relative to the matched
-reference is calculated as
-
-\begin{equation}
-\mathrm{Speedup}
-=
-\frac{T_{\mathrm{reference}}}
-     {T_{\mathrm{quantized}}}.
-\label{eq:evaluation-speedup}
-\end{equation}
-
-If the value is greater than one indicates that the quantized implementation is
-faster than its reference.
-
-Eager execution and CUDA Graph execution are considered separately
-because graph replay can reduce Python and kernel-launch overhead.
-Consequently, runtime performance is interpreted as a property of the
-combination of quantization representation and execution backend rather
-than of nominal bit width alone.
