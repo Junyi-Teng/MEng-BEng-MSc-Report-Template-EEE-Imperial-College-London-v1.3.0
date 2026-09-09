@@ -17,7 +17,7 @@
 
 \section{Dimensions of Post-Training Quantization}
 
-LLM quantization reduces the numerical precision used to represent model tensors in order to lower storage, memory traffic and potentially inference cost. The practical difficulty increases as precision is reduced, particularly for Transformer models whose weight and activation distributions may contain sensitive channels or large-magnitude outliers. Quantization can therefore differ not only in bit width but also in scope, ranging from weight-only schemes to methods that additionally quantize runtime activations and the \ac{KV} cache. These distinctions provide the basis for the specific methods reviewed in the following sections.
+LLM quantization reduces the numerical precision used to represent model tensors in order to lower storage, memory traffic and potentially inference cost. The practical difficulty increases as precision is reduced, particularly for Transformer models whose weight and activation distributions may contain sensitive channels or large-magnitude outliers. Quantization can therefore differ not only in bit width but also in scope, ranging from weight-only schemes to methods that additionally quantize runtime activations and the {KV} cache. These distinctions provide the basis for the specific methods reviewed in the following sections.
 
 
 \subsection{Post-Training Quantization and Calibration}
@@ -29,10 +29,10 @@ quantization-aware training, in which simulated quantization effects are
 introduced during optimisation so that the model parameters can adapt to
 the resulting numerical error.\cite{jacob2017quantizationtrainingneuralnetworks}
 For large pretrained language models, avoiding full retraining makes
-\ac{PTQ} attractive when the original training data or computational
+{PTQ} attractive when the original training data or computational
 budget are unavailable.
 
-A typical \ac{PTQ} method uses representative calibration inputs to
+A typical {PTQ} method uses representative calibration inputs to
 estimate information needed to construct the low-precision model. The
 required information is method dependent. It may include activation
 ranges, clipping thresholds, channel statistics or layer-output
@@ -96,22 +96,22 @@ Q_{\mathrm{V}}(\mathbf{x})
 The joint representation allows the codebook to exploit the geometry of
 a block rather than allocating reconstruction levels independently to
 each coordinate~\cite{1094577}. Classical vector quantization therefore provides a
-different rate--distortion trade-off from scalar rounding. This distinction becomes important later in the chapter: GPTQ, AWQ and SmoothQuant primarily operate with scalar or group-wise representations, whereas QuIP\# and NestQuant introduce structured vector
+different rate--distortion trade-off from scalar rounding. This distinction becomes important later in the chapter: \ac{GPTQ}, AWQ and SmoothQuant primarily operate with scalar or group-wise representations, whereas QuIP\# and NestQuant introduce structured vector
 codebooks~\cite{tseng2024quipbetterllmquantization,savkin2025nestquantnestedlatticequantization}.
 
 
 \section{Weight-Only Post-Training Quantization}
 
 Weight-only quantization reduces the precision of the fixed model
-parameters while retaining runtime activations and the \ac{KV} cache at
+parameters while retaining runtime activations and the {KV} cache at
 higher precision. This setting is attractive because the weights
 represent a large persistent component of the model and can be processed
 offline. However, aggressive low-bit weight quantization can introduce
 large layer-output errors, particularly when a small subset of channels
 is more important to the computation than the remainder.
 
-\subsection{\ac{GPTQ}}
-GPTQ is a reconstruction-aware weight-only \ac{PTQ} method designed for
+\subsection{{GPTQ}}
+GPTQ is a reconstruction-aware weight-only {PTQ} method designed for
 large Transformer models\cite{frantar2023gptqaccurateposttrainingquantization}.
 
 For a weight matrix \(\mathbf{W}\), calibration activations
@@ -144,8 +144,8 @@ activation or KV-cache precision. It is therefore reviewed as an
 important reconstruction-aware reference, but it is not one of the four
 principal experimental routes evaluated in Chapter~\ref{ch4}.
 
-\subsection{\ac{AWQ}}
-\ac{AWQ} is a hardware-oriented weight-only post-training quantization
+\subsection{{AWQ}}
+{AWQ} is a hardware-oriented weight-only post-training quantization
 method developed for low-bit LLM inference. Its central observation is
 that weight values are not equally important to model behaviour.
 Experiments reported in the original work showed that protecting a
@@ -289,7 +289,7 @@ must be considered together when comparing low-bit implementations\cite{park2024
 
 \section{Weight--Activation Post-Training Quantization}
 
-Weight--activation \ac{PTQ} extends low-precision representation from
+Weight--activation {PTQ} extends low-precision representation from
 the static model parameters to the dynamically generated activations
 used during inference. Compared with weight-only quantization, this
 broader scope can reduce memory traffic across a larger fraction of the
@@ -346,7 +346,7 @@ group even when the outlying values themselves constitute only a small
 fraction of the activations\cite{wei-etal-2023-outlier}~\cite{wei2023outliersuppressionpushinglimit}.
 
 \subsection{SmoothQuant}
-SmoothQuant is a training-free W8A8 \ac{PTQ} method that addresses
+SmoothQuant is a training-free W8A8 {PTQ} method that addresses
 activation outliers through an equivalent channel-wise transformation. Its central observation is that weights
 are generally easier to quantize than activations. Quantization
 difficulty can therefore be redistributed: activation channels are
@@ -374,7 +374,7 @@ coefficient, activation granularity and execution backend used in the
 project are intentionally deferred to Chapter~\ref{ch3}.
 
 \subsection{W4A8-Related Approaches}
-\ac{W4A8} denotes a mixed-precision configuration in which model
+{W4A8} denotes a mixed-precision configuration in which model
 weights are represented using 4 bits and runtime activations using
 8 bits. It is therefore a precision regime rather than a single
 quantization algorithm. Conceptually, W4A8 combines the stronger
@@ -525,7 +525,7 @@ integer weight packing.
 For this reason, the later NestQuant experiments separate two questions.
 The A4 and KV4 configurations are used to study the sensitivity of model
 quality to broader quantization scope, whereas physical checkpoint and
-GPU-memory measurements are reported for the dedicated packed
+\ac{GPU}-memory measurements are reported for the dedicated packed
 W4A16KV16 deployment path. This avoids interpreting a numerical
 quality result as evidence of an unmeasured runtime memory saving.
 
