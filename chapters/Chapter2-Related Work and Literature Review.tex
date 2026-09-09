@@ -95,9 +95,9 @@ Q_{\mathrm{V}}(\mathbf{x})
 
 The joint representation allows the codebook to exploit the geometry of
 a block rather than allocating reconstruction levels independently to
-each coordinate. Classical vector quantization therefore provides a
+each coordinate~\cite{1094577}. Classical vector quantization therefore provides a
 different rate--distortion trade-off from scalar rounding. This distinction becomes important later in the chapter: GPTQ, AWQ and SmoothQuant primarily operate with scalar or group-wise representations, whereas QuIP\# and NestQuant introduce structured vector
-codebooks\cite{1094577}.
+codebooks~\cite{tseng2024quipbetterllmquantization,savkin2025nestquantnestedlatticequantization}.
 
 
 \section{Weight-Only Post-Training Quantization}
@@ -393,9 +393,9 @@ W8A8 model with a conventional 4-bit quantizer.
 Other studies address the same precision regime through alternative
 numerical representations. ZeroQuant-FP investigates FP4 weights and
 FP8 activations, together with constrained weight scaling and
-low-rank compensation, to reduce the degradation introduced by W4A8
+low-rank compensation\cite{wu2023zeroquantfpleapforwardllms}, to reduce the degradation introduced by W4A8
 quantization LQER instead combines activation-induced
-scaling with a low-rank approximation of the quantization error\cite{wu2023zeroquantfpleapforwardllms},
+scaling with a low-rank approximation of the quantization error,
 allowing part of the error discarded by the 4-bit weight representation
 to be reconstructed through an additional low-rank path\cite{pmlr-v235-zhang24j}.
 
@@ -434,7 +434,7 @@ between inputs, so calibration statistics cannot completely represent
 every activation pattern encountered during deployment. SmoothQuant
 addresses this problem by redistributing quantization difficulty from
 activations to weights through channel-wise scaling, whereas
-LLM.int8() retains selected outlier dimensions at higher precision\cite{ashkboos2024quarotoutlierfree4bitinference}.
+LLM.int8() retains selected outlier dimensions at higher precision\cite{dettmers2022llmint88bitmatrixmultiplication}.
 
 However, these approaches introduce different compromises:
 SmoothQuant remains dependent on representative calibration statistics
@@ -443,7 +443,7 @@ outlier path of LLM.int8() can introduce additional runtime overhead.
 The SmoothQuant study itself shows that an unsuitable migration strength
 can shift excessive quantization difficulty towards either activations
 or weights, demonstrating that the two operands cannot be optimised
-independently\cite{liu2025spinquantllmquantizationlearned}.
+independently~\cite{xiao2023icml-smoothquant}.
 
 \section{Structured Vector and Lattice Quantization}
 Scalar and group-wise quantizers allocate reconstruction values
@@ -473,7 +473,7 @@ dynamically at runtime.
 Recent information-theoretic work provides further motivation for
 vector-codebook approaches. Under a Gaussian weight model, universal
 codebooks can theoretically operate within a small rate gap of
-codebooks adapted to the second-order statistics of the activations\cite{egiazarian2024extremecompressionlargelanguage}. The result is non-constructive and does
+codebooks adapted to the second-order statistics of the activations. The result is non-constructive and does
 not itself provide an efficient deployment algorithm, but it reinforces
 the idea that low-bit representation can be analysed as a
 rate--distortion problem rather than only as scalar rounding.
@@ -568,6 +568,17 @@ low-bit weights with runtime activation quantization; and NestQuant
 extends structured vector quantization across weights, activations and
 the KV cache. Dedicated methods such as KIVI and KVQuant further show
 that cache quantization constitutes a separate design problem.
+
+Other methods like rotation-based methods provide another route to controlling outliers.
+QuaRot applies computationally equivalent rotations to support
+low-bit quantization of weights, activations and the KV
+cache~\cite{ashkboos2024quarotoutlierfree4bitinference}.
+SpinQuant instead learns rotation matrices to improve quantization
+accuracy~\cite{liu2025spinquantllmquantizationlearned}.
+
+AQLM provides an alternative based on learned additive codebooks and
+joint optimisation within Transformer
+blocks~\cite{egiazarian2024extremecompressionlargelanguage}.
 
 The methods also differ in calibration data, numerical formats,
 quantization granularity, model families, evaluation datasets and

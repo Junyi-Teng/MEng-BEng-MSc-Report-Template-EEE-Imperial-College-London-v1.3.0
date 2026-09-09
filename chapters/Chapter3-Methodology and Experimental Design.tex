@@ -446,6 +446,52 @@ where \(q\) controls the discrete lattice-code representation and
 \(k\) denotes the number of candidate scaling coefficients available
 during vector quantization.
 
+The notation W4.25 used in this dissertation refers to the effective
+packed storage rate of the retained NestQuant weight representation,
+rather than directly to the theoretical entropy associated with
+\(q=14\) and \(k=4\).
+
+For an 8-dimensional vector, \(q=14\) provides 14 possible lattice-code
+states per coordinate, while \(k=4\) provides four candidate scaling
+coefficients. The corresponding ideal code rate is therefore
+
+\begin{equation}
+R_{\mathrm{ideal}}
+=
+\log_{2}(14)
++
+\frac{\log_{2}(4)}{8}
+\approx
+4.0574
+\quad
+\text{bits per weight}.
+\label{eq:nestquant-ideal-rate}
+\end{equation}
+
+In the retained packed implementation, however, each lattice-code
+coordinate is stored using a fixed 4-bit field. In addition, each
+8-dimensional vector stores a 2-bit index identifying one of the four
+candidate scaling coefficients. The resulting physical packed rate is
+
+\begin{equation}
+R_{\mathrm{packed}}
+=
+4
++
+\frac{2}{8}
+=
+4.25
+\quad
+\text{bits per weight}.
+\label{eq:nestquant-packed-rate}
+\end{equation}
+
+Accordingly, W4.25 denotes the practical packed weight representation
+used in this project. It should not be interpreted as the theoretical
+rate implied solely by the \(q=14,\;k=4\) configuration. The complete
+model footprint is also affected by scaling and normalisation metadata,
+padding, and tensors that remain outside the quantized weight scope.
+
 Before lattice quantization, the relevant tensors are transformed using
 an orthogonal Hadamard rotation. The purpose of this transformation is
 to redistribute large-magnitude coordinates across dimensions and
