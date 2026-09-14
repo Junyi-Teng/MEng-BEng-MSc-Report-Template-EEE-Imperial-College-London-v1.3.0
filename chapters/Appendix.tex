@@ -1,0 +1,119 @@
+\doublespacing % Do not change - required
+
+\chapter{A.Experimental Configuration}
+This appendix records the retained experimental configuration used for
+the principal results reported in this dissertation. Its purpose is to
+provide the implementation-level settings required to interpret and
+reproduce the final experiments while distinguishing them from earlier
+development and diagnostic runs.
+
+All principal experiments use
+\texttt{meta-llama/Llama-3.2-3B-Instruct} as the common source model.
+The source checkpoint is represented using BF16 parameters and provides
+the full-precision reference for the cross-method comparisons. The main
+experiments were executed on a single NVIDIA GeForce RTX~5090 using
+CUDA~12.8, PyTorch~2.11.0 and Transformers~5.10.1.
+
+Table~\ref{tab:app-reproduction} summarises the retained hardware,
+calibration and evaluation settings.
+
+\begin{table}[htbp]
+\centering
+\caption{Experimental configuration used for the retained experiments.}
+\label{tab:app-reproduction}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.18}
+
+\begin{tabularx}{\textwidth}{@{}
+>{\raggedright\arraybackslash}p{0.40\textwidth}
+>{\raggedright\arraybackslash}X
+@{}}
+\toprule
+\textbf{Setting} & \textbf{Retained configuration} \\
+\midrule
+
+Source model &
+\texttt{meta-llama/Llama-3.2-3B-Instruct} \\
+
+Source precision &
+BF16 \\
+
+GPU &
+NVIDIA GeForce RTX~5090 \\
+
+CUDA version &
+12.8 \\
+
+PyTorch version &
+2.11.0 \\
+
+Transformers version &
+5.10.1 \\
+
+Decoder layers &
+28 \\
+
+Target Linear modules &
+196 \\
+
+Target weight elements &
+2,818,572,288 \\
+
+Calibration dataset &
+UltraChat-200k \texttt{train\_sft} \\
+
+NestQuant calibration context &
+2,048 tokens \\
+
+Evaluation dataset &
+UltraChat-200k \texttt{test\_sft} \\
+
+Evaluation target &
+Assistant-response tokens only \\
+
+Assistant responses &
+73,150 \\
+
+Scored assistant tokens &
+4,500,809 \\
+
+Maximum sequence length &
+256 tokens \\
+
+Maximum scored response length &
+64 tokens \\
+
+Batch size &
+1 \\
+
+Warm-up &
+3 examples excluded from measurement \\
+
+Primary quality metric &
+Perplexity \\
+
+Cross-method quality reference &
+BF16 \\
+
+NestQuant scope-ablation reference &
+W4.25A16KV16 \\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+The common model-quality evaluation follows an assistant-response-only
+scoring protocol. User turns and preceding conversational context remain
+available as model input, but only assistant-response positions
+contribute to negative log-likelihood and perplexity. Dataset loading
+and tokenisation are excluded from the measured execution region.
+
+Across the 28 decoder layers, this corresponds to 196 target Linear modules and
+2,818,572,288 target weight elements. Embeddings, normalisation
+parameters, the language-model head and other non-target tensors remain
+outside this common Linear-layer quantization scope unless explicitly
+stated otherwise.
+
