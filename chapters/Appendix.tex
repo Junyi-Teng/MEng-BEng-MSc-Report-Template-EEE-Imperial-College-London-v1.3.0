@@ -1,18 +1,6 @@
 \doublespacing % Do not change - required
 
-\chapter{A.Experimental Configuration}
-This appendix records the retained experimental configuration used for
-the principal results reported in this dissertation. Its purpose is to
-provide the implementation-level settings required to interpret and
-reproduce the final experiments while distinguishing them from earlier
-development and diagnostic runs.
-
-All principal experiments use
-\texttt{meta-llama/Llama-3.2-3B-Instruct} as the common source model.
-The source checkpoint is represented using BF16 parameters and provides
-the full-precision reference for the cross-method comparisons. The main
-experiments were executed on a single NVIDIA GeForce RTX~5090 using
-CUDA~12.8, PyTorch~2.11.0 and Transformers~5.10.1.
+\chapter{Experimental Configuration}
 
 Table~\ref{tab:app-reproduction} summarises the retained hardware,
 calibration and evaluation settings.
@@ -105,15 +93,544 @@ W4.25A16KV16 \\
 \end{spacing}
 \end{table}
 
-The common model-quality evaluation follows an assistant-response-only
-scoring protocol. User turns and preceding conversational context remain
-available as model input, but only assistant-response positions
-contribute to negative log-likelihood and perplexity. Dataset loading
-and tokenisation are excluded from the measured execution region.
-
 Across the 28 decoder layers, this corresponds to 196 target Linear modules and
 2,818,572,288 target weight elements. Embeddings, normalisation
 parameters, the language-model head and other non-target tensors remain
 outside this common Linear-layer quantization scope unless explicitly
 stated otherwise.
 
+This appendix records the retained experimental configuration used for
+the principal results reported in this dissertation. Its purpose is to
+provide the implementation-level settings required to interpret and
+reproduce the final experiments while distinguishing them from earlier
+development and diagnostic runs.
+
+All principal experiments use
+\texttt{meta-llama/Llama-3.2-3B-Instruct} as the common source model.
+The source checkpoint is represented using BF16 parameters and provides
+the full-precision reference for the cross-method comparisons. The main
+experiments were executed on a single NVIDIA GeForce RTX~5090 using
+CUDA~12.8, PyTorch~2.11.0 and Transformers~5.10.1.
+
+\chapter{Implementation Details}
+
+The project-specific W4A8 pipeline requires a calibration stage to
+select the scaling transformation used before final weight
+quantization. Algorithm~\ref{alg:w4a8-calibration} summarises this
+procedure. Candidate scales are evaluated using block-output
+reconstruction error, after which the retained weights are quantized
+using grouped symmetric INT4 and stored in packed form.
+
+\begin{algorithm}[htbp]
+\caption{Project-specific W4A8 calibration and weight construction}
+\label{alg:w4a8-calibration}
+
+\KwIn{
+BF16 model $M$;
+calibration set $\mathcal{D}_{\mathrm{cal}}$;
+target Linear layers $\mathcal{L}$;
+group size $G=128$;
+candidate scale set $\mathcal{S}=\{s^{(1)},\ldots,s^{(20)}\}$
+}
+
+\KwOut{
+Packed INT4 weights and retained scaling parameters
+}
+
+Collect representative input activations for all
+$\ell \in \mathcal{L}$ using $\mathcal{D}_{\mathrm{cal}}$\;
+
+\ForEach{target Linear layer $\ell \in \mathcal{L}$}{
+
+    Compute the BF16 reference block output
+    $Y_{\mathrm{BF16}}$\;
+
+    $E_{\min} \leftarrow +\infty$\;
+    $s^{*} \leftarrow \varnothing$\;
+
+    \ForEach{candidate scale $s \in \mathcal{S}$}{
+
+        Apply the candidate channel-wise scaling transformation\;
+
+        Quantize the transformed weights using grouped symmetric
+        INT4 with group size $G$\;
+
+        Simulate the intended W4A8 numerical path to obtain
+        $Y_{\mathrm{W4A8}}(s)$\;
+
+        $E(s) \leftarrow
+        \frac{1}{N}
+        \sum_{n=1}^{N}
+        \left\|
+        Y_{\mathrm{BF16}}^{(n)}
+        -
+        Y_{\mathrm{W4A8}}^{(n)}(s)
+        \right\|_2^2$\;
+
+        \If{$E(s)<E_{\min}$}{
+            $E_{\min} \leftarrow E(s)$\;
+            $s^{*} \leftarrow s$\;
+        }
+    }
+
+    Reconstruct the layer using the retained scale $s^{*}$\;
+
+    Quantize the final weights using symmetric grouped INT4\;
+
+    Pack the INT4 weight codes for runtime execution\;
+}
+
+\Return packed W4 weights and associated scaling parameters\;
+
+\end{algorithm}
+
+After calibration, the W4A8 configuration combines the retained packed
+4-bit weights with dynamically quantized 8-bit activations during
+inference. Algorithm~\ref{alg:w4a8-runtime} describes the runtime
+activation-quantization procedure and the subsequent low-precision
+Linear operation.
+
+\begin{algorithm}[htbp]
+\caption{Dynamic W4A8 runtime execution for one Linear layer}
+\label{alg:w4a8-runtime}
+
+\KwIn{
+Floating-point activation matrix $X$;
+packed INT4 weights $W_{4}$;
+weight scales $S_W$
+}
+
+\KwOut{
+Higher-precision output activation $Y$
+}
+
+\ForEach{input token row $x_i$ in $X$}{
+
+    $s_{x_i}
+    \leftarrow
+    \dfrac{\max_j |x_{i,j}|}{127}$\;
+
+    $q_{x_i}
+    \leftarrow
+    \operatorname{clip}
+    \left(
+    \operatorname{round}
+    \left(
+    \dfrac{x_i}{s_{x_i}}
+    \right),
+    -127,127
+    \right)$\;
+}
+
+$X_{8} \leftarrow
+\operatorname{stack}(q_{x_1},\ldots,q_{x_m})$\;
+
+Execute the low-bit Linear path using
+$X_{8}$, packed $W_{4}$, $S_W$ and the activation scales\;
+
+Accumulate the matrix product in the supported higher-precision
+accumulator\;
+
+Apply the corresponding dequantization/scaling factors\;
+
+$Y \leftarrow$ reconstructed output activation\;
+
+\Return $Y$\;
+
+\end{algorithm}
+
+NestQuant differs from the scalar and group-wise integer quantizers by
+representing eight-dimensional weight vectors using a structured
+\(E_8\) lattice. Algorithm~\ref{alg:nestquant-packing} summarises the
+selection of the candidate scaling coefficient and the construction of
+the retained packed representation.
+
+\begin{algorithm}[htbp]
+\caption{NestQuant vector quantization and W4.25 packing}
+\label{alg:nestquant-packing}
+
+\KwIn{
+Weight vector block $v\in\mathbb{R}^{8}$;
+candidate scales
+$\{\beta_1,\ldots,\beta_k\}$ with $k=4$;
+$E_8$ lattice quantizer
+}
+
+\KwOut{
+Packed lattice code and 2-bit scale index
+}
+
+Apply the retained normalisation procedure to $v$\;
+
+Apply the orthogonal Hadamard rotation\;
+
+$D_{\min} \leftarrow +\infty$\;
+$p^{*} \leftarrow 0$\;
+$c^{*} \leftarrow \varnothing$\;
+
+\For{$p\leftarrow1$ \KwTo $k$}{
+
+    $\tilde{v}
+    \leftarrow
+    \dfrac{v}{\beta_p}$\;
+
+    $c_p
+    \leftarrow
+    \operatorname{Encode}_{E_8}(\tilde{v})$\;
+
+    $\hat{v}_p
+    \leftarrow
+    \beta_p
+    \operatorname{Decode}_{E_8}(c_p)$\;
+
+    $D_p
+    \leftarrow
+    \left\|
+    v-\hat{v}_p
+    \right\|_2^2$\;
+
+    \If{$D_p<D_{\min}$}{
+        $D_{\min}\leftarrow D_p$\;
+        $p^{*}\leftarrow p$\;
+        $c^{*}\leftarrow c_p$\;
+    }
+}
+
+Store each coordinate code of $c^{*}$ using a fixed 4-bit field\;
+
+Store $p^{*}$ using a 2-bit scale index\;
+
+$R_{\mathrm{packed}}
+\leftarrow
+\dfrac{8\times4+2}{8}
+=
+4.25$ bits per weight\;
+
+\Return $(c^{*},p^{*})$\;
+
+\end{algorithm}
+
+
+
+
+\chapter{Supplementary Results}
+\label{app:supplementary-results}
+
+This appendix consolidates the numerical results underlying the
+principal comparisons in Chapter~4. The tables provide a compact
+numerical counterpart to the figures presented in the main text.
+
+Table~\ref{tab:app-quality-results} reports the complete cross-method
+perplexity comparison relative to the common BF16 baseline.
+
+\begin{table}[htbp]
+\centering
+\caption{Complete cross-method model-quality results.}
+\label{tab:app-quality-results}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.18}
+
+\begin{tabularx}{0.92\textwidth}{@{}
+>{\raggedright\arraybackslash}X
+>{\centering\arraybackslash}p{0.18\textwidth}
+>{\centering\arraybackslash}p{0.20\textwidth}
+>{\centering\arraybackslash}p{0.18\textwidth}
+@{}}
+\toprule
+\textbf{Configuration}
+&
+\textbf{PPL}
+&
+\textbf{Absolute \(\Delta\)PPL}
+&
+\textbf{Relative \(\Delta\)PPL}
+\\
+\midrule
+
+BF16 baseline
+&
+7.125503
+&
+0.000000
+&
+0.00\%
+\\
+
+SmoothQuant W8A8KV16
+&
+7.159544
+&
++0.034041
+&
++0.48\%
+\\
+
+NestQuant W4.25A16KV16
+&
+7.171211
+&
++0.045708
+&
++0.64\%
+\\
+
+AWQ W4A16KV16
+&
+7.418013
+&
++0.292510
+&
++4.11\%
+\\
+
+NestQuant W4.25A4KV4
+&
+7.421992
+&
++0.296489
+&
++4.16\%
+\\
+
+Project-specific W4A8
+&
+7.488315
+&
++0.362812
+&
++5.09\%
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+Table~\ref{tab:app-memory-results} reports the runtime model-tensor
+storage and peak GPU-memory measurements for the principal
+cross-method comparison.
+
+\begin{table}[htbp]
+\centering
+\caption{Complete runtime-storage and peak-GPU-memory results.}
+\label{tab:app-memory-results}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.18}
+\setlength{\tabcolsep}{4pt}
+
+\begin{tabularx}{\textwidth}{@{}
+>{\raggedright\arraybackslash}X
+>{\centering\arraybackslash}p{0.17\textwidth}
+>{\centering\arraybackslash}p{0.17\textwidth}
+>{\centering\arraybackslash}p{0.17\textwidth}
+>{\centering\arraybackslash}p{0.17\textwidth}
+@{}}
+\toprule
+\textbf{Configuration}
+&
+\textbf{Runtime storage (GiB)}
+&
+\textbf{Storage reduction}
+&
+\textbf{Peak GPU (GiB)}
+&
+\textbf{GPU reduction}
+\\
+\midrule
+
+BF16
+&
+5.98
+&
+---
+&
+6.33
+&
+---
+\\
+
+SmoothQuant W8A8KV16
+&
+3.36
+&
+43.8\%
+&
+3.70
+&
+41.5\%
+\\
+
+AWQ W4A16KV16
+&
+2.13
+&
+64.4\%
+&
+2.47
+&
+61.0\%
+\\
+
+Project-specific W4A8
+&
+2.13
+&
+64.4\%
+&
+2.47
+&
+61.0\%
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+The nearly identical storage and peak-memory results of AWQ and the
+project-specific W4A8 pipeline indicate that their packed 4-bit weight
+representations dominate the persistent memory reduction. Dynamic A8
+processing changes the numerical execution path but does not materially
+reduce the persistent model-tensor storage beyond the packed W4
+representation.
+
+Table~\ref{tab:app-nestquant-results} reports the complete NestQuant
+quantization-scope ablation relative to W4.25A16KV16.
+
+\begin{table}[htbp]
+\centering
+\caption{Complete NestQuant quantization-scope ablation results.}
+\label{tab:app-nestquant-results}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.18}
+
+\begin{tabularx}{0.92\textwidth}{@{}
+>{\raggedright\arraybackslash}X
+>{\centering\arraybackslash}p{0.18\textwidth}
+>{\centering\arraybackslash}p{0.20\textwidth}
+>{\centering\arraybackslash}p{0.18\textwidth}
+@{}}
+\toprule
+\textbf{Configuration}
+&
+\textbf{PPL}
+&
+\textbf{Absolute \(\Delta\)PPL}
+&
+\textbf{Relative \(\Delta\)PPL}
+\\
+\midrule
+
+W4.25A16KV16
+&
+7.171211
+&
+0.000000
+&
+0.000\%
+\\
+
+W4.25A16KV4
+&
+7.224471
+&
++0.053260
+&
++0.743\%
+\\
+
+W4.25A4KV16
+&
+7.382130
+&
++0.210919
+&
++2.941\%
+\\
+
+W4.25A4KV4
+&
+7.421992
+&
++0.250781
+&
++3.497\%
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+The ablation shows that activation quantization contributes the larger
+quality penalty. The relative increase caused by A4 is approximately
+four times the increase caused by KV4 under the retained configuration.
+The combined A4+KV4 configuration produces the largest degradation but
+also represents the broadest quantization scope considered in the
+NestQuant quality experiments.
+
+Finally, Table~\ref{tab:app-packed-nestquant} summarises the physical
+deployment measurements obtained for packed NestQuant
+W4.25A16KV16.
+
+\begin{table}[htbp]
+\centering
+\caption{Packed NestQuant W4.25A16KV16 deployment results.}
+\label{tab:app-packed-nestquant}
+
+\begin{spacing}{1}
+\small
+\renewcommand{\arraystretch}{1.18}
+
+\begin{tabularx}{0.86\textwidth}{@{}
+>{\raggedright\arraybackslash}X
+>{\centering\arraybackslash}p{0.21\textwidth}
+>{\centering\arraybackslash}p{0.23\textwidth}
+>{\centering\arraybackslash}p{0.19\textwidth}
+@{}}
+\toprule
+\textbf{Metric}
+&
+\textbf{FP16 reference}
+&
+\textbf{Packed NestQuant}
+&
+\textbf{Reduction}
+\\
+\midrule
+
+Checkpoint size
+&
+5.78 GiB
+&
+2.16 GiB
+&
+62.6\%
+\\
+
+Peak GPU memory
+&
+6.01 GiB
+&
+2.84 GiB
+&
+52.7\%
+\\
+
+\bottomrule
+\end{tabularx}
+\end{spacing}
+\end{table}
+
+These packed-deployment measurements demonstrate that the retained
+W4.25 representation produces a substantially smaller physical model
+artefact and a lower peak GPU-memory requirement. The corresponding
+claim is limited to the packed W4.25A16KV16 deployment path; equivalent
+packed A4 and KV4 deployment savings were not measured in the present
+study.
