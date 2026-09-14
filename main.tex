@@ -104,6 +104,7 @@ Comparative Evaluation of AWQ, SmoothQuant, W4A8 and NestQuant
     hyperref=auto
 ]{biblatex}
 \usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage[titletoc]{appendix}
 %...
 % ADDITIONAL COMMANDS
 %Examples
@@ -143,7 +144,23 @@ Comparative Evaluation of AWQ, SmoothQuant, W4A8 and NestQuant
 % APPENDICES ARE OPTIONAL
 % COMMENT OUT BOTH LINES BELOW TO REMOVE THEM
 % ADD CHAPTERS TO ADD MULTIPLE APPENDICES
-\appendix 
+\appendix
+
+% Appendix chapter heading format:
+% display "Appendix A", "Appendix B", "Appendix C"
+% while retaining A, B, C internally for tables and references.
+\begin{appendices}
+
+\input{Appendix.tex}
+
+\end{appendices}
+\titleformat{\chapter}[display]
+  {\normalfont\raggedleft\bfseries\color{ImperialBlue}}
+  {\fontsize{42}{44}\selectfont Appendix~\thechapter}
+  {12pt}
+  {\Huge\raggedleft\color{ImperialBlue}}
+
+\titlespacing*{\chapter}{0pt}{0pt}{20pt}
 
 \input{Appendix.tex}
 

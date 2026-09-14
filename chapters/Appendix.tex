@@ -1,5 +1,5 @@
 \doublespacing % Do not change - required
-
+\label{Appendix}
 \chapter{Experimental Configuration}
 
 Table~\ref{tab:app-reproduction} summarises the retained hardware,
@@ -98,12 +98,6 @@ Across the 28 decoder layers, this corresponds to 196 target Linear modules and
 parameters, the language-model head and other non-target tensors remain
 outside this common Linear-layer quantization scope unless explicitly
 stated otherwise.
-
-This appendix records the retained experimental configuration used for
-the principal results reported in this dissertation. Its purpose is to
-provide the implementation-level settings required to interpret and
-reproduce the final experiments while distinguishing them from earlier
-development and diagnostic runs.
 
 All principal experiments use
 \texttt{meta-llama/Llama-3.2-3B-Instruct} as the common source model.
